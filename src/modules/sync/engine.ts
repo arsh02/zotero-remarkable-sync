@@ -171,7 +171,10 @@ export interface PullSummary {
  * Pull annotations for every synced attachment whose reMarkable document has
  * changed since the last pull, writing them as native Zotero annotations.
  */
-export async function pullAll(progress?: ProgressFn): Promise<PullSummary> {
+export async function pullAll(
+  progress?: ProgressFn,
+  opts: { force?: boolean } = {},
+): Promise<PullSummary> {
   ensureNetworkGlobals();
   const summary: PullSummary = {
     updated: 0,
@@ -210,7 +213,7 @@ export async function pullAll(progress?: ProgressFn): Promise<PullSummary> {
         done++;
         continue;
       }
-      if (entry.hash === rec.lastPulledVersion) {
+      if (!opts.force && entry.hash === rec.lastPulledVersion) {
         log(`pullAll: "${rec.visibleName}" unchanged since last pull`);
         done++;
         continue; // unchanged since last pull

@@ -6,6 +6,7 @@ export type FluentMessageId =
   | 'item-section-remarkable-head-text'
   | 'item-section-remarkable-sidenav-tooltip'
   | 'menuitem-add-to-sync'
+  | 'menuitem-force-pull'
   | 'menuitem-remove-from-sync'
   | 'menuitem-sync-now'
   | 'pref-connection-code'

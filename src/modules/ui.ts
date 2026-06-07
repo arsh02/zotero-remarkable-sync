@@ -23,6 +23,7 @@ const ELEMENT_IDS = [
   `${ID}-tb-syncnow`,
   `${ID}-style`,
   `${ID}-tools-syncnow`,
+  `${ID}-tools-forcepull`,
   `${ID}-sep`,
   `${ID}-add`,
   `${ID}-remove`,
@@ -95,6 +96,43 @@ export async function runSyncNow(): Promise<void> {
   }
 }
 
+/** Force a re-pull of annotations (ignores the unchanged-since-last-pull guard). */
+export async function runForcePull(): Promise<void> {
+  if (!client.isConnected()) {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: getString("status-not-connected"), type: "fail" })
+      .show(4000);
+    return;
+  }
+  const pw = new ztoolkit.ProgressWindow(config.addonName, {
+    closeOnClick: true,
+    closeTime: -1,
+  })
+    .createLine({ text: getString("sync-running"), progress: 0 })
+    .show();
+  try {
+    const pull = await engine.pullAll(
+      (text, pct) => pw.changeLine({ progress: pct, text }),
+      { force: true },
+    );
+    pw.changeLine({
+      progress: 100,
+      text: getString("sync-complete", {
+        args: { pushed: 0, annotations: pull.annotations },
+      }),
+    });
+    pw.startCloseTimer(5000);
+  } catch (e) {
+    log("runForcePull error:", e);
+    pw.changeLine({
+      type: "fail",
+      progress: 100,
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
+    });
+    pw.startCloseTimer(8000);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-window UI (toolbar button, Tools menu, context menu)
 // ---------------------------------------------------------------------------
@@ -145,6 +183,14 @@ function registerToolsMenu(win: Window): void {
       "tools-syncnow",
       getString("menuitem-sync-now"),
       () => void runSyncNow(),
+    ),
+  );
+  toolsPopup.appendChild(
+    makeMenuitem(
+      doc,
+      "tools-forcepull",
+      getString("menuitem-force-pull"),
+      () => void runForcePull(),
     ),
   );
 }

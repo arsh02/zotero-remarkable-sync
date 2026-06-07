@@ -2,6 +2,7 @@ startup-begin = reMarkable Sync is loading
 startup-finish = reMarkable Sync is ready
 
 menuitem-sync-now = reMarkable: Sync now
+menuitem-force-pull = reMarkable: Force re-pull annotations
 menuitem-add-to-sync = reMarkable: Add to sync
 menuitem-remove-from-sync = reMarkable: Remove from sync
 
