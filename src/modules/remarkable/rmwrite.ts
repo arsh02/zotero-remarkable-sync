@@ -14,6 +14,13 @@ const TAG_ID = 0xf;
 const TAG_LEN4 = 0xc;
 const TAG_B8 = 0x8;
 const TAG_B4 = 0x4;
+const TAG_B1 = 0x1;
+
+// Fixed author UUID for plugin-created pages (the author map is local to a file).
+const AUTHOR_UUID = [
+  0x72, 0x6d, 0x73, 0x79, 0x6e, 0x63, 0x00, 0x10, 0x80, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x01,
+];
 
 export interface CrdtId {
   part1: number;
@@ -94,12 +101,30 @@ export class Writer {
   color(index: number, [r, g, b, a]: [number, number, number, number]): void {
     this.int(index, ((b | (g << 8) | (r << 16) | (a << 24)) >>> 0) as number);
   }
+  bool(index: number, v: boolean): void {
+    this.tag(index, TAG_B1);
+    this.u8(v ? 1 : 0);
+  }
   string(index: number, s: string): void {
     this.sub(index, (w) => {
       const b = utf8Encode(s);
       w.varuint(b.length);
       w.u8(1); // is_ascii flag
       w.bytes(b);
+    });
+  }
+  /** Last-write-wins string: subblock of {timestamp id, string}. */
+  lwwString(index: number, ts: CrdtId, value: string): void {
+    this.sub(index, (w) => {
+      w.id(1, ts);
+      w.string(2, value);
+    });
+  }
+  /** Last-write-wins bool: subblock of {timestamp id, bool}. */
+  lwwBool(index: number, ts: CrdtId, value: boolean): void {
+    this.sub(index, (w) => {
+      w.id(1, ts);
+      w.bool(2, value);
     });
   }
 
@@ -316,6 +341,91 @@ export function splitStructure(bytes: Uint8Array): Uint8Array {
     pos = blockEnd;
   }
   return Uint8Array.from(out);
+}
+
+export interface RmStructure {
+  /** header + structural blocks (no scene items) */
+  structure: Uint8Array;
+  /** the layer node to parent new items to */
+  layerId: CrdtId;
+  /** a registered author id to mint new item ids under */
+  author: number;
+  /** first counter to use for new item ids */
+  startCounter: number;
+}
+
+/**
+ * Generate a blank, device-valid page from scratch: author ids, migration info,
+ * page info, scene tree, a root group and one layer group. Used when a page has
+ * no `.rm` and the document has no other page to clone. Ported from rmscene's
+ * `simple_text_document` (minus the text).
+ */
+export function blankStructure(author = 1): RmStructure {
+  const w = new Writer();
+  w.bytes(utf8Encode(HEADER_V6));
+  const cid = (a: number, b: number): CrdtId => ({ part1: a, part2: b });
+
+  // AuthorIdsBlock (0x09): map author id -> uuid.
+  w.block(0x09, 1, 1, (b) => {
+    b.varuint(1);
+    b.sub(0, (s) => {
+      s.varuint(16);
+      s.bytes(AUTHOR_UUID);
+      s.u16(author);
+    });
+  });
+  // MigrationInfoBlock (0x00).
+  w.block(0x0, 1, 1, (b) => {
+    b.id(1, cid(1, 1));
+    b.bool(2, true); // is_device
+    b.bool(3, false);
+  });
+  // PageInfoBlock (0x0A).
+  w.block(0xa, 0, 1, (b) => {
+    b.int(1, 1); // loads_count
+    b.int(2, 0); // merges_count
+    b.int(3, 0); // text_chars_count
+    b.int(4, 0); // text_lines_count
+    b.int(5, 0); // type_folio_use_count
+  });
+  // SceneTreeBlock (0x01): registers the layer subtree under the root.
+  w.block(0x1, 1, 1, (b) => {
+    b.id(1, cid(0, 11)); // tree_id
+    b.id(2, cid(0, 0)); // node_id
+    b.bool(3, true); // is_update
+    b.sub(4, (s) => s.id(1, cid(0, 1))); // parent_id = root
+  });
+  // TreeNodeBlock (0x02): root group.
+  w.block(0x2, 1, 2, (b) => {
+    b.id(1, cid(0, 1));
+    b.lwwString(2, cid(0, 0), "");
+    b.lwwBool(3, cid(0, 0), true);
+  });
+  // TreeNodeBlock (0x02): the layer.
+  w.block(0x2, 1, 2, (b) => {
+    b.id(1, cid(0, 11));
+    b.lwwString(2, cid(0, 12), "Layer 1");
+    b.lwwBool(3, cid(0, 0), true);
+  });
+  // SceneGroupItemBlock (0x04): make the layer a child of the root.
+  w.block(0x4, 1, 1, (b) => {
+    b.id(1, cid(0, 1)); // parent = root
+    b.id(2, cid(0, 13)); // item_id
+    b.id(3, cid(0, 0)); // left
+    b.id(4, cid(0, 0)); // right
+    b.int(5, 0); // deleted_length
+    b.sub(6, (s) => {
+      s.u8(0x02); // ITEM_TYPE: group
+      s.id(2, cid(0, 11)); // value = layer node id
+    });
+  });
+
+  return {
+    structure: w.result(),
+    layerId: cid(0, 11),
+    author,
+    startCounter: 20,
+  };
 }
 
 /**

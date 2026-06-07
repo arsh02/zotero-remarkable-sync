@@ -14,7 +14,11 @@ import * as client from "../remarkable/client";
 import { mapPdfPages, type PageRef } from "../remarkable/rmdoc";
 import { parseRmPage } from "../remarkable/rmlines";
 import type { RmStroke, RmHighlight, CrdtId } from "../remarkable/rmlines";
-import { encodeAppend, splitStructure } from "../remarkable/rmwrite";
+import {
+  encodeAppend,
+  splitStructure,
+  blankStructure,
+} from "../remarkable/rmwrite";
 import { updateDocumentPages } from "../remarkable/rmupload";
 import { zoteroToRm } from "../remarkable/colors";
 import {
@@ -180,9 +184,10 @@ export async function pushAnnotations(
         (byPage.get(pi) ?? byPage.set(pi, []).get(pi)!).push(a);
       }
 
-      // A template page (any page that has a .rm) lets us create page files for
-      // pages the device has never had annotations on (clone its structure).
-      const template = await loadTemplate(api, pageMap);
+      // To create page files for pages the device has never annotated, clone an
+      // existing page's structure, or generate a blank one if the document has
+      // no annotated page at all.
+      const template = (await loadTemplate(api, pageMap)) ?? blankStructure();
 
       const pageRm = new Map<string, Uint8Array>();
       const pushedNow: string[] = [];

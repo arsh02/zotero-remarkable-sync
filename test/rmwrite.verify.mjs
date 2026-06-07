@@ -11,9 +11,8 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { parseRmPage } = await import(join(root, ".scaffold/rmlines.mjs"));
-const { writeItems, encodeAppend, splitStructure } = await import(
-  join(root, ".scaffold/rmwrite.mjs")
-);
+const { writeItems, encodeAppend, splitStructure, blankStructure } =
+  await import(join(root, ".scaffold/rmwrite.mjs"));
 
 const approx = (a, b, eps = 1e-3) =>
   assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -215,6 +214,43 @@ for (const name of [
   assert.equal(cloned.strokes.length, 1, "cloned page has the new stroke");
 }
 
+// --- blankStructure: from-scratch page parses, and items append cleanly ---
+{
+  const blank = blankStructure();
+  const empty = parseRmPage(blank.structure);
+  assert.equal(empty.strokes.length, 0);
+  assert.equal(empty.highlights.length, 0);
+  const page = parseRmPage(
+    encodeAppend(
+      blank.structure,
+      [
+        {
+          tool: 17,
+          colorIndex: 0,
+          thickness: 2,
+          pointWidth: 16,
+          isHighlighter: false,
+          points: [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+          ],
+        },
+      ],
+      [{ text: "hi", colorIndex: 3, rects: [{ x: 0, y: 0, w: 5, h: 5 }] }],
+      {
+        layerId: blank.layerId,
+        author: blank.author,
+        startCounter: blank.startCounter,
+      },
+    ),
+  );
+  assert.equal(page.strokes.length, 1, "blank page accepts a stroke");
+  assert.equal(page.highlights.length, 1, "blank page accepts a highlight");
+  // Items parent to the generated layer node (0, 11).
+  assert.equal(page.layerId.part1, 0);
+  assert.equal(page.layerId.part2, 11);
+}
+
 console.log(
-  "✓ rmwrite round-trips through the parser (synthetic + fixtures + append + clone)",
+  "✓ rmwrite round-trips (synthetic + fixtures + append + clone + blank page)",
 );

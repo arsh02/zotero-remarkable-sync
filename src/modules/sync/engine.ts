@@ -115,6 +115,10 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
   const folderId = await client.ensureFolder(api, folder);
   log(`pushAll: folderId="${folderId}"`);
 
+  // The device documents that currently exist — so we can re-upload (restore)
+  // any that were deleted on the reMarkable. Zotero is the source of truth.
+  const deviceDocIds = new Set((await api.listItems()).map((e) => e.id));
+
   let done = 0;
   for (const att of attachments) {
     const name = displayNameFor(att);
@@ -132,15 +136,21 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
       const fileHash = await sha256Hex(bytes);
 
       const existing = await getRecord(att.key);
-      if (existing && existing.fileHash === fileHash) {
+      const missingOnDevice = !!existing && !deviceDocIds.has(existing.docId);
+      if (existing && existing.fileHash === fileHash && !missingOnDevice) {
         log(`pushAll: skip "${name}" (unchanged)`);
         summary.skipped++;
         done++;
         continue;
       }
+      if (missingOnDevice) {
+        log(`pushAll: "${name}" was removed from device — restoring`);
+      }
 
       log(`pushAll: uploading "${name}" (${bytes.length} bytes) …`);
       const entry = await client.uploadPdf(api, name, bytes, folderId);
+      // When restoring a deleted document, reset annotation tracking so every
+      // Zotero annotation gets re-pushed onto the fresh document.
       const record: SyncRecord = {
         docId: entry.id,
         docHash: entry.hash,
@@ -148,8 +158,11 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
         visibleName: name,
         libraryID: att.libraryID,
         lastPushed: Date.now(),
-        lastPulledVersion: existing?.lastPulledVersion,
-        annotationKeys: existing?.annotationKeys,
+        lastPulledVersion: missingOnDevice
+          ? undefined
+          : existing?.lastPulledVersion,
+        annotationKeys: missingOnDevice ? [] : existing?.annotationKeys,
+        pushedKeys: missingOnDevice ? [] : existing?.pushedKeys,
       };
       await setRecord(att.key, record);
       log(`pushAll: uploaded "${name}" -> ${entry.id}`);
