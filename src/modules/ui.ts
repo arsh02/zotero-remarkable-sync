@@ -10,7 +10,9 @@ import { log, errMsg } from "../utils/log";
 import * as engine from "./sync/engine";
 import * as client from "./remarkable/client";
 
-const ICON = `chrome://${config.addonRef}/content/icons/favicon.png`;
+// 96px icon (manifest/install). For in-app UI we use a small 32px variant so
+// it isn't rendered oversized in the toolbar / item-pane sidenav.
+const ICON = `chrome://${config.addonRef}/content/icons/icon-small.png`;
 const ID = `${config.addonRef}`;
 const SECTION_ID = `${config.addonRef}-status`;
 
@@ -96,6 +98,17 @@ function registerToolbarButton(win: Window, nodes: Element[]): void {
   const doc = win.document;
   const toolbar = doc.getElementById("zotero-items-toolbar");
   if (!toolbar) return;
+
+  // Constrain the button icon to 16px so it matches Zotero's own buttons.
+  const style = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "style",
+  ) as HTMLStyleElement;
+  style.id = `${ID}-style`;
+  style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon { width: 16px; height: 16px; }`;
+  doc.documentElement?.appendChild(style);
+  nodes.push(style);
+
   const btn = (doc as any).createXULElement("toolbarbutton") as Element;
   btn.id = `${ID}-tb-syncnow`;
   btn.setAttribute("class", "zotero-tb-button");
