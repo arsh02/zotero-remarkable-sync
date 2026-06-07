@@ -182,11 +182,11 @@ export async function pullAll(progress?: ProgressFn): Promise<PullSummary> {
 
   const records = await allRecords();
   const keys = Object.keys(records);
+  log(`pullAll: start (${keys.length} synced record(s))`);
   if (keys.length === 0) return summary;
 
   const api = await client.getApi();
   progress?.("Checking reMarkable for annotations…", 0);
-  log(`pullAll: ${keys.length} synced attachment(s)`);
 
   // Snapshot the cloud listing once, then look up each doc by id.
   const remote = await api.listItems(true);
@@ -206,10 +206,12 @@ export async function pullAll(progress?: ProgressFn): Promise<PullSummary> {
 
       const entry = byId.get(rec.docId);
       if (!entry) {
+        log(`pullAll: "${rec.visibleName}" not found on cloud (${rec.docId})`);
         done++;
         continue;
       }
       if (entry.hash === rec.lastPulledVersion) {
+        log(`pullAll: "${rec.visibleName}" unchanged since last pull`);
         done++;
         continue; // unchanged since last pull
       }

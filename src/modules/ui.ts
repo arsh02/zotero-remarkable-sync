@@ -75,6 +75,7 @@ export async function runSyncNow(): Promise<void> {
     const report = (text: string, pct: number) =>
       pw.changeLine({ progress: pct, text });
     const push = await engine.pushAll(report);
+    log("runSyncNow: push done, starting pull");
     const pull = await engine.pullAll(report);
     pw.changeLine({
       progress: 100,

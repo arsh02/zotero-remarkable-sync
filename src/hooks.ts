@@ -4,7 +4,11 @@ import {
   registerPrefsScripts,
 } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { log } from "./utils/log";
 import * as ui from "./modules/ui";
+
+// Build marker — bump when shipping a build you want to confirm is loaded.
+const BUILD = "M2-pull-annotations";
 
 async function onStartup() {
   await Promise.all([
@@ -13,6 +17,7 @@ async function onStartup() {
     Zotero.uiReadyPromise,
   ]);
 
+  log(`reMarkable Sync loaded — build ${BUILD}`);
   initLocale();
 
   // Register the Settings pane and the item-pane status section (both global,
