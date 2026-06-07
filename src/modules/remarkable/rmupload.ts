@@ -36,15 +36,21 @@ async function updateOnce(
 
   const doc = await raw.getEntries(`${docId}.docSchema`, docEntry.hash);
 
-  // Replace each page's .rm blob. Only pages that already have an entry are
-  // supported (we reuse the exact file id the cloud uses).
+  // Write each page's .rm blob. Reuse the exact file id when the page already
+  // has one; otherwise derive a new id from an existing .rm entry's prefix.
   for (const [pageUuid, bytes] of pageRm) {
     const existing = doc.entries.find((e) => e.id.endsWith(`${pageUuid}.rm`));
-    if (!existing) {
-      log(`rmupload: page ${pageUuid} has no existing .rm — skipped`);
-      continue;
+    let fileId: string;
+    if (existing) {
+      fileId = existing.id;
+    } else {
+      const sample = doc.entries.find((e) => e.id.endsWith(".rm"));
+      const slash = sample ? sample.id.lastIndexOf("/") : -1;
+      const prefix = slash >= 0 ? sample!.id.slice(0, slash + 1) : `${docId}/`;
+      fileId = `${prefix}${pageUuid}.rm`;
+      log(`rmupload: creating new page file ${fileId}`);
     }
-    const [fileEntry, finish] = await raw.putFile(existing.id, bytes);
+    const [fileEntry, finish] = await raw.putFile(fileId, bytes);
     await finish;
     upsert(doc.entries, fileEntry);
   }

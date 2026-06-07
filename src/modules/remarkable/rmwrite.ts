@@ -292,6 +292,33 @@ function writeChain(
 }
 
 /**
+ * Return a copy of a real `.rm` page with all scene items removed — i.e. its
+ * header plus structural blocks (author ids, page info, scene tree, layers).
+ * Used as a device-valid template for a page that has no `.rm` yet: clone the
+ * structure of an existing page, then append our items to it.
+ */
+export function splitStructure(bytes: Uint8Array): Uint8Array {
+  const HEADER_LEN = 43;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out: number[] = [];
+  for (let i = 0; i < HEADER_LEN; i++) out.push(bytes[i]);
+
+  let pos = HEADER_LEN;
+  while (pos + 8 <= bytes.length) {
+    const blockLen = dv.getUint32(pos, true);
+    const type = bytes[pos + 7];
+    const blockEnd = pos + 8 + blockLen;
+    if (blockEnd > bytes.length) break;
+    // Skip item blocks (line 0x05, glyph 0x03, tombstone 0x08); keep structure.
+    if (type !== 0x05 && type !== 0x03 && type !== 0x08) {
+      for (let i = pos; i < blockEnd; i++) out.push(bytes[i]);
+    }
+    pos = blockEnd;
+  }
+  return Uint8Array.from(out);
+}
+
+/**
  * Append new item blocks (no header) onto an existing real `.rm` page, reusing
  * its layer and chaining after its last item. Keeps the page's device-valid
  * structure intact while adding our annotations.

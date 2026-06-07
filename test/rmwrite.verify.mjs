@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { parseRmPage } = await import(join(root, ".scaffold/rmlines.mjs"));
-const { writeItems, encodeAppend } = await import(
+const { writeItems, encodeAppend, splitStructure } = await import(
   join(root, ".scaffold/rmwrite.mjs")
 );
 
@@ -169,6 +169,52 @@ for (const name of [
   approx(re.strokes[0].points[0].x, orig.strokes[0].points[0].x);
 }
 
+// --- splitStructure: strip items, keep structure, re-append cleanly ---
+{
+  const bytes = new Uint8Array(
+    readFileSync(
+      join(
+        root,
+        "test/fixtures/rm",
+        "More_color_highlight_shader_v3.15.4.2.rm",
+      ),
+    ),
+  );
+  const orig = parseRmPage(bytes);
+  assert.ok(orig.strokes.length > 0);
+  const structure = splitStructure(bytes);
+  // Structure alone should parse with no items.
+  const blank = parseRmPage(structure);
+  assert.equal(blank.strokes.length, 0, "structure has no strokes");
+  assert.equal(blank.highlights.length, 0, "structure has no highlights");
+  // Appending one item onto the cloned structure yields exactly that item.
+  const cloned = parseRmPage(
+    encodeAppend(
+      structure,
+      [
+        {
+          tool: 17,
+          colorIndex: 0,
+          thickness: 2,
+          pointWidth: 16,
+          isHighlighter: false,
+          points: [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+          ],
+        },
+      ],
+      [],
+      {
+        layerId: orig.layerId,
+        author: orig.lastItemId?.part1 ?? orig.maxAuthor,
+        startCounter: orig.maxCounter + 1,
+      },
+    ),
+  );
+  assert.equal(cloned.strokes.length, 1, "cloned page has the new stroke");
+}
+
 console.log(
-  "✓ rmwrite round-trips through the parser (synthetic + 3 fixtures + append)",
+  "✓ rmwrite round-trips through the parser (synthetic + fixtures + append + clone)",
 );

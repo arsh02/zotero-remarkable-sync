@@ -2,20 +2,19 @@
 //
 // For each synced attachment, take the annotations that originated in Zotero
 // (not pulled from the device, not already pushed), convert them to reMarkable
-// strokes/highlights, append them to the relevant page's existing `.rm`, and
-// commit via the raw sync API.
-//
-// Limitation: only pages that already have a `.rm` on the device can be appended
-// to (we reuse their layer + structure). Annotations on never-touched pages are
-// skipped and logged.
+// strokes/highlights, and write them onto the relevant page, then commit via the
+// raw sync API. A page that already has a `.rm` is appended to (reusing its
+// layer); a page with none gets a new `.rm` cloned from another page's structure
+// (loadTemplate). If the document has no `.rm` anywhere, those pages are skipped.
 
 import { ensureNetworkGlobals } from "../../utils/globals";
 import { log, errMsg } from "../../utils/log";
+import type { RemarkableApi } from "rmapi-js";
 import * as client from "../remarkable/client";
-import { mapPdfPages } from "../remarkable/rmdoc";
+import { mapPdfPages, type PageRef } from "../remarkable/rmdoc";
 import { parseRmPage } from "../remarkable/rmlines";
-import type { RmStroke, RmHighlight } from "../remarkable/rmlines";
-import { encodeAppend } from "../remarkable/rmwrite";
+import type { RmStroke, RmHighlight, CrdtId } from "../remarkable/rmlines";
+import { encodeAppend, splitStructure } from "../remarkable/rmwrite";
 import { updateDocumentPages } from "../remarkable/rmupload";
 import { zoteroToRm } from "../remarkable/colors";
 import {
@@ -86,6 +85,38 @@ function annotationToRm(
   return out;
 }
 
+interface Template {
+  structure: Uint8Array;
+  layerId: CrdtId;
+  author: number;
+  startCounter: number;
+}
+
+/** Find any page that has a `.rm` and turn it into a structural template. */
+async function loadTemplate(
+  api: RemarkableApi,
+  pageMap: Map<number, PageRef>,
+): Promise<Template | null> {
+  for (const ref of pageMap.values()) {
+    if (!ref.rmEntry) continue;
+    try {
+      const bytes = await api.raw.getHash(ref.rmEntry.id, ref.rmEntry.hash);
+      const parsed = parseRmPage(bytes);
+      if (parsed.layerId) {
+        return {
+          structure: splitStructure(bytes),
+          layerId: parsed.layerId,
+          author: parsed.lastItemId?.part1 ?? parsed.maxAuthor,
+          startCounter: parsed.maxCounter + 1,
+        };
+      }
+    } catch {
+      // try the next page
+    }
+  }
+  return null;
+}
+
 /** Push Zotero-origin annotations for every synced attachment. */
 export async function pushAnnotations(
   progress?: ProgressFn,
@@ -149,21 +180,15 @@ export async function pushAnnotations(
         (byPage.get(pi) ?? byPage.set(pi, []).get(pi)!).push(a);
       }
 
+      // A template page (any page that has a .rm) lets us create page files for
+      // pages the device has never had annotations on (clone its structure).
+      const template = await loadTemplate(api, pageMap);
+
       const pageRm = new Map<string, Uint8Array>();
       const pushedNow: string[] = [];
       for (const [pdfIdx, annots] of byPage) {
         const ref = pageMap.get(pdfIdx);
-        if (!ref?.rmEntry) {
-          log(`push: page ${pdfIdx + 1} not on device — skipped`);
-          summary.skipped += annots.length;
-          continue;
-        }
-        const existing = await api.raw.getHash(
-          ref.rmEntry.id,
-          ref.rmEntry.hash,
-        );
-        const parsed = parseRmPage(existing);
-        if (!parsed.layerId) {
+        if (!ref) {
           summary.skipped += annots.length;
           continue;
         }
@@ -174,18 +199,44 @@ export async function pushAnnotations(
           const c = annotationToRm(a, size);
           strokes.push(...c.strokes);
           highlights.push(...c.highlights);
-          pushedNow.push(a.key);
         }
-        // Reuse an author id already registered in the page (a new one would
-        // be ignored by the device), with counters above every existing one.
-        const author =
-          parsed.lastItemId?.part1 ?? parsed.layerId?.part1 ?? parsed.maxAuthor;
-        const newBytes = encodeAppend(existing, strokes, highlights, {
-          layerId: parsed.layerId,
-          lastItemId: parsed.lastItemId,
-          author,
-          startCounter: parsed.maxCounter + 1,
-        });
+
+        let newBytes: Uint8Array;
+        if (ref.rmEntry) {
+          // Append to the page's own existing .rm (reuse its layer + author).
+          const existing = await api.raw.getHash(
+            ref.rmEntry.id,
+            ref.rmEntry.hash,
+          );
+          const parsed = parseRmPage(existing);
+          if (!parsed.layerId) {
+            summary.skipped += annots.length;
+            continue;
+          }
+          const author =
+            parsed.lastItemId?.part1 ??
+            parsed.layerId?.part1 ??
+            parsed.maxAuthor;
+          newBytes = encodeAppend(existing, strokes, highlights, {
+            layerId: parsed.layerId,
+            lastItemId: parsed.lastItemId,
+            author,
+            startCounter: parsed.maxCounter + 1,
+          });
+        } else if (template) {
+          // Page has no .rm yet — clone a template page's structure.
+          newBytes = encodeAppend(template.structure, strokes, highlights, {
+            layerId: template.layerId,
+            author: template.author,
+            startCounter: template.startCounter,
+          });
+        } else {
+          log(`push: page ${pdfIdx + 1} has no .rm and no template — skipped`);
+          summary.skipped += annots.length;
+          continue;
+        }
+
+        for (const a of annots) pushedNow.push(a.key);
         pageRm.set(ref.pageUuid, newBytes);
       }
 
