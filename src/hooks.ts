@@ -7,9 +7,12 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { log } from "./utils/log";
 import * as ui from "./modules/ui";
 import * as scheduler from "./modules/scheduler";
+import * as engine from "./modules/sync/engine";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M2-pull-annotations";
+const BUILD = "M4-deletion-sync";
+
+let notifierID: string | null = null;
 
 async function onStartup() {
   await Promise.all([
@@ -26,6 +29,16 @@ async function onStartup() {
   await registerPrefPane();
   ui.registerSection();
   scheduler.start();
+
+  // Watch for items being trashed/deleted so we can remove them from the device.
+  notifierID = Zotero.Notifier.registerObserver(
+    {
+      notify: (event, type, ids, extraData) =>
+        addon.hooks.onNotify(event, type, ids as any, extraData),
+    },
+    ["item"],
+    addon.data.config.addonRef,
+  );
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -56,6 +69,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 function onShutdown(): void {
   scheduler.stop();
+  if (notifierID) {
+    Zotero.Notifier.unregisterObserver(notifierID);
+    notifierID = null;
+  }
   ui.unregisterAllWindows();
   ui.unregisterSection();
   ztoolkit.unregisterAll();
@@ -75,7 +92,27 @@ async function onNotify(
   ids: Array<string | number>,
   extraData: { [key: string]: any },
 ) {
-  ztoolkit.log("notify", event, type, ids, extraData);
+  if (type !== "item" || (event !== "trash" && event !== "delete")) return;
+
+  // Collect the keys of affected attachments (records are keyed by attachment).
+  const keys = new Set<string>();
+  for (const id of ids) {
+    const item = Zotero.Items.get(Number(id));
+    if (item) {
+      keys.add(item.key);
+      if (item.isRegularItem()) {
+        for (const aid of item.getAttachments(true)) {
+          const att = Zotero.Items.get(aid);
+          if (att) keys.add(att.key);
+        }
+      }
+    } else if (extraData?.[id]?.key) {
+      keys.add(extraData[id].key);
+    }
+  }
+  if (keys.size === 0) return;
+
+  engine.unsyncByKeys([...keys]).catch((e) => log("unsync (notify) error:", e));
 }
 
 /**

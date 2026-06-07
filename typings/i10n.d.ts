@@ -29,6 +29,7 @@ export type FluentMessageId =
   | 'pref-sync-folder'
   | 'pref-sync-tag'
   | 'pref-sync-title'
+  | 'pull-done'
   | 'push-done'
   | 'startup-begin'
   | 'startup-finish'

@@ -88,7 +88,8 @@ export async function runSyncNow(): Promise<void> {
         args: {
           files: push.pushed,
           sent: sent.pushed,
-          annotations: pull.annotations,
+          added: pull.annotations,
+          removed: pull.removed,
         },
       }),
     });
@@ -125,8 +126,8 @@ export async function runForcePull(): Promise<void> {
     );
     pw.changeLine({
       progress: 100,
-      text: getString("sync-complete", {
-        args: { pushed: 0, annotations: pull.annotations },
+      text: getString("pull-done", {
+        args: { added: pull.annotations, removed: pull.removed },
       }),
     });
     pw.startCloseTimer(5000);

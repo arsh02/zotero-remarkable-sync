@@ -171,6 +171,7 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
 export interface PullSummary {
   updated: number;
   annotations: number;
+  removed: number;
   failed: number;
   errors: string[];
 }
@@ -187,6 +188,7 @@ export async function pullAll(
   const summary: PullSummary = {
     updated: 0,
     annotations: 0,
+    removed: 0,
     failed: 0,
     errors: [],
   };
@@ -237,17 +239,25 @@ export async function pullAll(
         : new Uint8Array();
       const sizes = readPdfPageSizes(bytes);
 
-      const newKeys = await applyAnnotations(att as Zotero.Item, pages, sizes);
+      const result = await applyAnnotations(
+        att as Zotero.Item,
+        pages,
+        sizes,
+        rec.annotationKeys ?? [],
+      );
 
       const updated: SyncRecord = {
         ...rec,
         lastPulledVersion: entry.hash,
-        annotationKeys: [...(rec.annotationKeys ?? []), ...newKeys],
+        annotationKeys: result.keys,
       };
       await setRecord(attKey, updated);
       summary.updated++;
-      summary.annotations += newKeys.length;
-      log(`pullAll: "${rec.visibleName}" -> ${newKeys.length} annotation(s)`);
+      summary.annotations += result.added;
+      summary.removed += result.removed;
+      log(
+        `pullAll: "${rec.visibleName}" -> +${result.added} -${result.removed} annotation(s)`,
+      );
     } catch (e) {
       log(`pullAll: FAILED "${rec.visibleName}": ${errMsg(e)}`);
       summary.failed++;
@@ -290,6 +300,40 @@ export async function clearPulledAnnotations(): Promise<number> {
   }
   log(`clearPulledAnnotations: removed ${removed}`);
   return removed;
+}
+
+/**
+ * Remove the reMarkable documents for the given attachment keys and forget them.
+ * Used when items are deleted/trashed in Zotero.
+ */
+export async function unsyncByKeys(attKeys: string[]): Promise<void> {
+  const want = new Set(attKeys);
+  const records = await allRecords();
+  const hits = Object.keys(records).filter((k) => want.has(k));
+  if (hits.length === 0) return;
+
+  let api: Awaited<ReturnType<typeof client.getApi>> | null = null;
+  if (client.isConnected()) {
+    try {
+      ensureNetworkGlobals();
+      api = await client.getApi();
+    } catch {
+      api = null;
+    }
+  }
+  for (const attKey of hits) {
+    const rec = records[attKey];
+    if (api) {
+      try {
+        const entry = await client.findById(api, rec.docId);
+        if (entry) await client.deleteDoc(api, entry.hash);
+        log(`unsync: deleted "${rec.visibleName}" from device`);
+      } catch (e) {
+        log(`unsync: delete failed for "${rec.visibleName}": ${errMsg(e)}`);
+      }
+    }
+    await removeRecord(attKey);
+  }
 }
 
 /** Tag the given regular items so they are included in sync. */

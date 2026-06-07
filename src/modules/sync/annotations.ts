@@ -209,25 +209,32 @@ function buildInk(
   };
 }
 
+export interface ApplyResult {
+  /** updated full set of keys for annotations this plugin created on pull */
+  keys: string[];
+  added: number;
+  removed: number;
+}
+
 /**
- * Add the reMarkable annotations that aren't already present on the attachment.
- * Never deletes anything. Returns the keys of the newly created annotations.
+ * Mirror the device's annotations onto the attachment:
+ *  - add device annotations not already present,
+ *  - remove annotations WE previously pulled (`ourKeys`) that have disappeared
+ *    from the device.
+ * Never touches the user's own annotations. Returns the updated key set.
  */
 export async function applyAnnotations(
   attachment: Zotero.Item,
   docPages: RmDocPage[],
   sizes: PdfPageSize[],
-): Promise<string[]> {
-  const seen = new Set<string>();
-  for (const a of attachment.getAnnotations()) {
-    const s = existingSig(a);
-    if (s) seen.add(s);
-  }
-
-  const newKeys: string[] = [];
+  ourKeys: string[] = [],
+): Promise<ApplyResult> {
+  // Build the device's current set: pendings to create + their signatures.
+  const pendings: Pending[] = [];
+  const incoming = new Set<string>();
   for (const { pdfPageIndex, page } of docPages) {
     const size = pageSizeAt(sizes, pdfPageIndex);
-    const pendings: (Pending | null)[] = [
+    const built = [
       ...page.highlights.map((hl) => buildHighlight(pdfPageIndex, hl, size)),
       ...page.strokes.map((st) =>
         st.isHighlighter
@@ -235,14 +242,49 @@ export async function applyAnnotations(
           : buildInk(pdfPageIndex, st, size),
       ),
     ];
-    for (const p of pendings) {
-      if (!p || seen.has(p.signature)) continue;
-      const key = await save(attachment, p.json);
-      if (key) {
-        seen.add(p.signature);
-        newKeys.push(key);
+    for (const p of built) {
+      if (p) {
+        pendings.push(p);
+        incoming.add(p.signature);
       }
     }
   }
-  return newKeys;
+
+  const ourSet = new Set(ourKeys);
+  const present = new Set<string>();
+  const keptKeys: string[] = [];
+  let removed = 0;
+
+  // Pass over existing annotations: delete ours that vanished; index the rest.
+  for (const a of attachment.getAnnotations()) {
+    const s = existingSig(a);
+    if (ourSet.has(a.key)) {
+      if (s && incoming.has(s)) {
+        keptKeys.push(a.key);
+        if (s) present.add(s);
+      } else {
+        try {
+          await a.eraseTx();
+          removed++;
+        } catch {
+          keptKeys.push(a.key); // couldn't delete — keep tracking it
+        }
+      }
+    } else if (s) {
+      present.add(s); // user's own annotation — never touched, used for dedup
+    }
+  }
+
+  // Add device annotations not already present.
+  const newKeys: string[] = [];
+  for (const p of pendings) {
+    if (present.has(p.signature)) continue;
+    const key = await save(attachment, p.json);
+    if (key) {
+      present.add(p.signature);
+      newKeys.push(key);
+    }
+  }
+
+  return { keys: [...keptKeys, ...newKeys], added: newKeys.length, removed };
 }

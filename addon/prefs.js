@@ -11,4 +11,4 @@ pref("syncMode", "manual");
 // Auto-sync interval in minutes (used when syncMode === "interval").
 pref("syncInterval", 30);
 // When removing an item from sync, also delete it from the reMarkable cloud.
-pref("deleteOnUnsync", false);
+pref("deleteOnUnsync", true);
