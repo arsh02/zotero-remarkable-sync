@@ -12,5 +12,15 @@ export default zotero({
         "@typescript-eslint/no-unused-vars": "off",
       },
     },
+    {
+      // Standalone Node test harnesses (run outside Zotero).
+      files: ["test/**/*.mjs"],
+      languageOptions: {
+        globals: {
+          console: "readonly",
+          process: "readonly",
+        },
+      },
+    },
   ],
 });
