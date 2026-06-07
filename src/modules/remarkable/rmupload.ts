@@ -28,6 +28,9 @@ async function updateOnce(
   log(`rmupload: pre-write root=${rootHash} generation=${generation}`);
 
   const root = await raw.getEntries("root.docSchema", rootHash);
+  // Snapshot the original document ids so we can refuse to commit a root that
+  // would drop any of them (safety against a bug in the entry rebuild).
+  const originalIds = new Set(root.entries.map((e) => e.id));
   const docEntry = root.entries.find((e) => e.id === docId);
   if (!docEntry) throw new Error(`document ${docId} not found in root`);
 
@@ -69,6 +72,16 @@ async function updateOnce(
   );
   await finishDoc;
   upsert(root.entries, newDocEntry);
+
+  // Safety: never commit a root that lost a document.
+  const newIds = new Set(root.entries.map((e) => e.id));
+  for (const id of originalIds) {
+    if (!newIds.has(id)) {
+      throw new Error(
+        `refusing to commit: document ${id} would be dropped from the root`,
+      );
+    }
+  }
 
   const [newRootEntry, finishRoot] = await raw.putEntries(
     "root",
