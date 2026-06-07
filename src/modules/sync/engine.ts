@@ -6,7 +6,7 @@ import { ensureNetworkGlobals } from "../../utils/globals";
 import { log, errMsg } from "../../utils/log";
 import * as client from "../remarkable/client";
 import { fetchAnnotations } from "../remarkable/rmdoc";
-import { readPdfPageSize } from "../remarkable/geometry";
+import { readPdfPageSizes, pageSizeAt } from "../remarkable/geometry";
 import {
   getRecord,
   setRecord,
@@ -36,16 +36,24 @@ export function isItemSynced(item: Zotero.Item): boolean {
   return item.hasTag(getSyncTag());
 }
 
-/** Find all regular (top-level) items carrying the sync tag. */
-export async function findSyncItems(
-  libraryID: number = Zotero.Libraries.userLibraryID,
-): Promise<Zotero.Item[]> {
+/** Find tagged regular items in one library. */
+async function findSyncItemsIn(libraryID: number): Promise<Zotero.Item[]> {
   const search = new Zotero.Search();
   // `libraryID` is typed read-only but is assignable on a fresh search.
   (search as any).libraryID = libraryID;
   search.addCondition("tag", "is", getSyncTag());
   const ids = await search.search();
   return Zotero.Items.get(ids).filter((it) => it.isRegularItem());
+}
+
+/** Find all regular (top-level) tagged items across every editable library. */
+export async function findSyncItems(): Promise<Zotero.Item[]> {
+  const libs = Zotero.Libraries.getAll().filter((l) => l.editable);
+  const out: Zotero.Item[] = [];
+  for (const lib of libs) {
+    out.push(...(await findSyncItemsIn(lib.libraryID)));
+  }
+  return out;
 }
 
 /** Collect the PDF attachments of the given regular items. */
@@ -227,9 +235,9 @@ export async function pullAll(
       const bytes: Uint8Array = path
         ? await IO.IOUtils.read(path)
         : new Uint8Array();
-      const size = readPdfPageSize(bytes);
+      const sizes = readPdfPageSizes(bytes);
 
-      const newKeys = await applyAnnotations(att as Zotero.Item, pages, size);
+      const newKeys = await applyAnnotations(att as Zotero.Item, pages, sizes);
 
       const updated: SyncRecord = {
         ...rec,

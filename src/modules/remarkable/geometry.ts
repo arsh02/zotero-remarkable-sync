@@ -75,25 +75,37 @@ function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-/**
- * Extract page sizes from a PDF by scanning for `/MediaBox` entries. Falls back
- * to US Letter. Most PDFs use a uniform page size; we return the first found
- * and reuse it for all pages.
- */
-export function readPdfPageSize(bytes: Uint8Array): PdfPageSize {
-  // Decode as latin1 so byte offsets line up with the text we search for.
+const LETTER: PdfPageSize = { width: 612, height: 792 };
+
+function decodeLatin1(bytes: Uint8Array): string {
   let s = "";
   const chunk = 32768;
   for (let i = 0; i < bytes.length; i += chunk) {
     s += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  const m = s.match(
-    /\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/,
-  );
-  if (m) {
+  return s;
+}
+
+/**
+ * Extract every `/MediaBox` entry from a PDF, in file order. PDFs that vary
+ * page size store a MediaBox per page (usually in order); uniform PDFs yield a
+ * single value reused for all pages. Falls back to US Letter.
+ */
+export function readPdfPageSizes(bytes: Uint8Array): PdfPageSize[] {
+  const s = decodeLatin1(bytes);
+  const re =
+    /\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/g;
+  const sizes: PdfPageSize[] = [];
+  for (let m = re.exec(s); m; m = re.exec(s)) {
     const width = Math.abs(parseFloat(m[3]) - parseFloat(m[1]));
     const height = Math.abs(parseFloat(m[4]) - parseFloat(m[2]));
-    if (width > 0 && height > 0) return { width, height };
+    if (width > 0 && height > 0) sizes.push({ width, height });
   }
-  return { width: 612, height: 792 };
+  return sizes.length ? sizes : [LETTER];
+}
+
+/** Page size for a given page index, reusing the last known size if needed. */
+export function pageSizeAt(sizes: PdfPageSize[], index: number): PdfPageSize {
+  if (!sizes.length) return LETTER;
+  return sizes[Math.min(index, sizes.length - 1)];
 }

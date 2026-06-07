@@ -329,6 +329,15 @@ function renderSection(
   body.replaceChildren();
   if (!item?.isRegularItem()) return;
 
+  // Guide the user to connect first.
+  if (!client.isConnected()) {
+    const hint = doc.createElement("div");
+    hint.style.opacity = "0.8";
+    hint.textContent = getString("status-not-connected");
+    body.appendChild(hint);
+    return;
+  }
+
   const synced = engine.isItemSynced(item);
 
   const status = doc.createElement("div");

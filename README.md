@@ -41,12 +41,12 @@ device token is stored in Zotero preferences.
 
 ## Usage
 
-- **Connect**: Settings → *Zotero reMarkable Sync* → paste a one-time code from
+- **Connect**: Settings → _Zotero reMarkable Sync_ → paste a one-time code from
   <https://my.remarkable.com/device/browser/connect>.
-- **Sync**: tag an item `@remarkable` (right-click → *reMarkable: Add to sync*),
+- **Sync**: tag an item `@remarkable` (right-click → _reMarkable: Add to sync_),
   then the toolbar **Sync now** button (or set an interval in preferences).
-- **Tools menu**: *Sync now*, *Force re-pull annotations*, *Remove pulled
-  annotations* (removes only plugin-created annotations).
+- **Tools menu**: _Sync now_, _Force re-pull annotations_, _Remove pulled
+  annotations_ (removes only plugin-created annotations).
 
 Annotations sync **reMarkable → Zotero** only; the Zotero side is never modified
 destructively, so you can keep annotating on the device. Text highlights become

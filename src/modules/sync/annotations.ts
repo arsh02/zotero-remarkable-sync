@@ -11,6 +11,7 @@ import {
   rectToZotero,
   strokeToPath,
   inkWidth,
+  pageSizeAt,
   type PdfPageSize,
 } from "../remarkable/geometry";
 import type { RmDocPage } from "../remarkable/rmdoc";
@@ -240,7 +241,7 @@ function buildInk(
 export async function applyAnnotations(
   attachment: Zotero.Item,
   docPages: RmDocPage[],
-  size: PdfPageSize,
+  sizes: PdfPageSize[],
 ): Promise<string[]> {
   const seen = new Set<string>();
   for (const a of attachment.getAnnotations()) {
@@ -250,6 +251,7 @@ export async function applyAnnotations(
 
   const newKeys: string[] = [];
   for (const { pdfPageIndex, page } of docPages) {
+    const size = pageSizeAt(sizes, pdfPageIndex);
     const pendings: (Pending | null)[] = [
       ...page.highlights.map((hl) => buildHighlight(pdfPageIndex, hl, size)),
       ...page.strokes.map((st) =>
