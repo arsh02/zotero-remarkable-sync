@@ -93,6 +93,11 @@ async function createHighlight(
 ): Promise<string | null> {
   const rects = hl.rects.map((r) => rectToZotero(r, size));
   if (!rects.length) return null;
+  log(
+    `calib HL p${pageIndex} page=${size.width}x${size.height} rmRect=${JSON.stringify(
+      hl.rects[0],
+    )} zRect=${JSON.stringify(rects[0])} text=${JSON.stringify(hl.text.slice(0, 24))}`,
+  );
   const topY = Math.max(...rects.map((r) => r[3]));
   return saveAnnotation(attachment, {
     type: "highlight",
@@ -113,6 +118,11 @@ async function createInk(
 ): Promise<string | null> {
   const path = strokeToPath(stroke.points, size);
   if (path.length < 4) return null;
+  log(
+    `calib INK p${pageIndex} page=${size.width}x${size.height} rmFirst=(${stroke.points[0].x.toFixed(
+      1,
+    )},${stroke.points[0].y.toFixed(1)}) zFirst=(${path[0]},${path[1]})`,
+  );
   let topY = 0;
   for (let i = 1; i < path.length; i += 2) topY = Math.max(topY, path[i]);
   return saveAnnotation(attachment, {
