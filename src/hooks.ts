@@ -48,6 +48,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  ui.unregisterAllWindows();
   ui.unregisterSection();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();

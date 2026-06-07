@@ -16,15 +16,35 @@ const ICON = `chrome://${config.addonRef}/content/icons/icon-small.png`;
 const ID = `${config.addonRef}`;
 const SECTION_ID = `${config.addonRef}-status`;
 
-interface WindowUI {
-  /** elements to remove on teardown */
-  nodes: Element[];
-  /** the item context menu and its popupshowing listener, for removal */
-  itemmenu?: Element;
-  onShowing?: (e: Event) => void;
+// Stable ids of every element we inject, so registration can be made
+// idempotent across hot-reloads (when our module-level state is reset but the
+// previously injected DOM nodes survive).
+const ELEMENT_IDS = [
+  `${ID}-tb-syncnow`,
+  `${ID}-style`,
+  `${ID}-tools-syncnow`,
+  `${ID}-sep`,
+  `${ID}-add`,
+  `${ID}-remove`,
+];
+// Property key under which we stash the popupshowing listener on the item menu
+// element, so a stale one can be removed even after a hot-reload.
+const SHOWING_KEY = `${ID}-onShowing`;
+
+/** Remove any UI we (or a previous hot-reloaded instance) injected into a window. */
+function clearWindowUI(win: Window): void {
+  const doc = win.document;
+  // Use querySelectorAll, not getElementById: stacked hot-reloads can leave
+  // several elements sharing the same id, and we must remove all of them.
+  ELEMENT_IDS.forEach((id) =>
+    doc.querySelectorAll(`#${id}`).forEach((el: Element) => el.remove()),
+  );
+  const itemmenu = doc.getElementById("zotero-itemmenu") as any;
+  if (itemmenu?.[SHOWING_KEY]) {
+    itemmenu.removeEventListener("popupshowing", itemmenu[SHOWING_KEY]);
+    delete itemmenu[SHOWING_KEY];
+  }
 }
-const registry = new Map<Window, WindowUI>();
-let sectionRegistered = false;
 
 // ---------------------------------------------------------------------------
 // Shared runner
@@ -94,7 +114,7 @@ function makeMenuitem(
   return item;
 }
 
-function registerToolbarButton(win: Window, nodes: Element[]): void {
+function registerToolbarButton(win: Window): void {
   const doc = win.document;
   const toolbar = doc.getElementById("zotero-items-toolbar");
   if (!toolbar) return;
@@ -107,7 +127,6 @@ function registerToolbarButton(win: Window, nodes: Element[]): void {
   style.id = `${ID}-style`;
   style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon { width: 16px; height: 16px; }`;
   doc.documentElement?.appendChild(style);
-  nodes.push(style);
 
   const btn = (doc as any).createXULElement("toolbarbutton") as Element;
   btn.id = `${ID}-tb-syncnow`;
@@ -116,30 +135,26 @@ function registerToolbarButton(win: Window, nodes: Element[]): void {
   btn.setAttribute("image", ICON);
   btn.addEventListener("command", () => void runSyncNow());
   toolbar.appendChild(btn);
-  nodes.push(btn);
 }
 
-function registerToolsMenu(win: Window, nodes: Element[]): void {
+function registerToolsMenu(win: Window): void {
   const doc = win.document;
   const toolsPopup = doc.getElementById("menu_ToolsPopup");
   if (!toolsPopup) return;
-  const item = makeMenuitem(
-    doc,
-    "tools-syncnow",
-    getString("menuitem-sync-now"),
-    () => void runSyncNow(),
+  toolsPopup.appendChild(
+    makeMenuitem(
+      doc,
+      "tools-syncnow",
+      getString("menuitem-sync-now"),
+      () => void runSyncNow(),
+    ),
   );
-  toolsPopup.appendChild(item);
-  nodes.push(item);
 }
 
-function registerContextMenu(
-  win: Window,
-  nodes: Element[],
-): { itemmenu?: Element; onShowing?: (e: Event) => void } {
+function registerContextMenu(win: Window): void {
   const doc = win.document;
   const itemmenu = doc.getElementById("zotero-itemmenu");
-  if (!itemmenu) return {};
+  if (!itemmenu) return;
 
   const sep = (doc as any).createXULElement("menuseparator") as Element;
   sep.id = `${ID}-sep`;
@@ -164,11 +179,7 @@ function registerContextMenu(
     },
   );
 
-  const menuNodes = [sep, addItem, removeItem];
-  menuNodes.forEach((n) => {
-    itemmenu.appendChild(n);
-    nodes.push(n);
-  });
+  [sep, addItem, removeItem].forEach((n) => itemmenu.appendChild(n));
 
   const onShowing = () => {
     const items = selectedRegularItems(win);
@@ -179,27 +190,26 @@ function registerContextMenu(
     (sep as any).hidden = items.length === 0;
   };
   itemmenu.addEventListener("popupshowing", onShowing);
-
-  return { itemmenu, onShowing };
+  (itemmenu as any)[SHOWING_KEY] = onShowing;
 }
 
 export function registerWindowUI(win: Window): void {
-  if (registry.has(win)) return;
-  const nodes: Element[] = [];
-  registerToolbarButton(win, nodes);
-  registerToolsMenu(win, nodes);
-  const { itemmenu, onShowing } = registerContextMenu(win, nodes);
-  registry.set(win, { nodes, itemmenu, onShowing });
+  // Idempotent: drop any leftovers from a previous (hot-reloaded) instance.
+  clearWindowUI(win);
+  registerToolbarButton(win);
+  registerToolsMenu(win);
+  registerContextMenu(win);
 }
 
 export function unregisterWindowUI(win: Window): void {
-  const reg = registry.get(win);
-  if (!reg) return;
-  if (reg.itemmenu && reg.onShowing) {
-    reg.itemmenu.removeEventListener("popupshowing", reg.onShowing);
+  clearWindowUI(win);
+}
+
+/** Tear down per-window UI in every open main window. */
+export function unregisterAllWindows(): void {
+  for (const win of Zotero.getMainWindows()) {
+    clearWindowUI(win as unknown as Window);
   }
-  reg.nodes.forEach((n) => n.remove());
-  registry.delete(win);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +217,8 @@ export function unregisterWindowUI(win: Window): void {
 // ---------------------------------------------------------------------------
 
 export function registerSection(): void {
-  if (sectionRegistered) return;
+  // Idempotent: a previous (hot-reloaded) instance may have left it registered.
+  unregisterSection();
   Zotero.ItemPaneManager.registerSection({
     paneID: SECTION_ID,
     pluginID: config.addonID,
@@ -221,13 +232,14 @@ export function registerSection(): void {
     },
     onRender: ({ body, item, doc }) => renderSection(body, item, doc),
   });
-  sectionRegistered = true;
 }
 
 export function unregisterSection(): void {
-  if (!sectionRegistered) return;
-  Zotero.ItemPaneManager.unregisterSection(SECTION_ID);
-  sectionRegistered = false;
+  try {
+    Zotero.ItemPaneManager.unregisterSection(SECTION_ID);
+  } catch {
+    // not registered — fine
+  }
 }
 
 function renderSection(
