@@ -1,13 +1,17 @@
 // Map reMarkable scene coordinates onto PDF points (Zotero annotation space:
 // origin bottom-left, units = PDF points).
 //
-// reMarkable stores annotations in a canvas whose width is RM_WIDTH px with x
-// centred on the page (0 at the middle) and y measured from the top. For a PDF,
-// the page is fit to the canvas width, so one scale factor (points per rm-px =
-// pdfWidth / RM_WIDTH) converts both axes.
+// reMarkable renders a PDF at a fixed device resolution (RM_DPI) and stores
+// annotation coordinates in those device pixels, with x measured from the page
+// centre and y from the top. So the conversion is a single constant scale —
+// 1 PDF point = RM_DPI/72 reMarkable units — independent of page size:
 //
-// NOTE: these constants are the first calibration target. If pulled annotations
-// land offset or mis-scaled, adjust RM_WIDTH (overall scale) / the centring.
+//   pdfX     = rmX * (72/RM_DPI) + pageWidth/2
+//   pdfYtop  = rmY * (72/RM_DPI)
+//   zoteroY  = pageHeight - pdfYtop      (flip to bottom-left origin)
+//
+// Verified against a real reMarkable export: highlight rects matched the baked
+// PDF vectors to <1pt. RM_DPI is the single calibration knob (226 = rM2 / rMPP).
 
 import type { RmPoint, RmRect } from "./rmlines";
 
@@ -18,23 +22,18 @@ export interface PdfPageSize {
   height: number;
 }
 
-export interface Geometry {
-  rmWidth: number;
-  rmHeight: number;
-}
-
-export const DEFAULT_GEOMETRY: Geometry = { rmWidth: 1404, rmHeight: 1872 };
+/** reMarkable device resolution. The only calibration constant. */
+export const RM_DPI = 226;
+const PT_PER_RM = 72 / RM_DPI;
 
 /** Map a reMarkable (x, y) to a PDF point [x, y] with origin bottom-left. */
 export function rmToPdf(
   x: number,
   y: number,
   page: PdfPageSize,
-  g: Geometry = DEFAULT_GEOMETRY,
 ): [number, number] {
-  const scale = page.width / g.rmWidth;
-  const px = (x + g.rmWidth / 2) * scale;
-  const pyFromTop = y * scale;
+  const px = x * PT_PER_RM + page.width / 2;
+  const pyFromTop = y * PT_PER_RM;
   return [px, page.height - pyFromTop];
 }
 
@@ -42,10 +41,9 @@ export function rmToPdf(
 export function rectToZotero(
   r: RmRect,
   page: PdfPageSize,
-  g: Geometry = DEFAULT_GEOMETRY,
 ): [number, number, number, number] {
-  const [ax, ay] = rmToPdf(r.x, r.y, page, g); // top-left
-  const [bx, by] = rmToPdf(r.x + r.w, r.y + r.h, page, g); // bottom-right
+  const [ax, ay] = rmToPdf(r.x, r.y, page); // top-left
+  const [bx, by] = rmToPdf(r.x + r.w, r.y + r.h, page); // bottom-right
   return [
     Math.min(ax, bx),
     Math.min(ay, by),
@@ -55,14 +53,10 @@ export function rectToZotero(
 }
 
 /** Convert a stroke's points to a flat Zotero ink path [x1,y1,x2,y2,...]. */
-export function strokeToPath(
-  points: RmPoint[],
-  page: PdfPageSize,
-  g: Geometry = DEFAULT_GEOMETRY,
-): number[] {
+export function strokeToPath(points: RmPoint[], page: PdfPageSize): number[] {
   const out: number[] = [];
   for (const p of points) {
-    const [x, y] = rmToPdf(p.x, p.y, page, g);
+    const [x, y] = rmToPdf(p.x, p.y, page);
     out.push(round(x), round(y));
   }
   return out;
@@ -80,7 +74,7 @@ function round(n: number): number {
 export function readPdfPageSize(bytes: Uint8Array): PdfPageSize {
   // Decode as latin1 so byte offsets line up with the text we search for.
   let s = "";
-  const chunk = 65536;
+  const chunk = 32768;
   for (let i = 0; i < bytes.length; i += chunk) {
     s += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
@@ -88,12 +82,8 @@ export function readPdfPageSize(bytes: Uint8Array): PdfPageSize {
     /\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/,
   );
   if (m) {
-    const x1 = parseFloat(m[1]);
-    const y1 = parseFloat(m[2]);
-    const x2 = parseFloat(m[3]);
-    const y2 = parseFloat(m[4]);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const width = Math.abs(parseFloat(m[3]) - parseFloat(m[1]));
+    const height = Math.abs(parseFloat(m[4]) - parseFloat(m[2]));
     if (width > 0 && height > 0) return { width, height };
   }
   return { width: 612, height: 792 };
