@@ -2,6 +2,7 @@ import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import * as client from "./remarkable/client";
+import * as scheduler from "./scheduler";
 
 /**
  * Register the plugin's preference pane so it appears in Zotero Settings.
@@ -72,4 +73,11 @@ function bindPrefEvents() {
       );
     }
   });
+
+  // Restart the auto-sync timer when the schedule prefs change. The preference
+  // binding writes the pref before this fires, so scheduler.start() reads fresh
+  // values.
+  const restart = () => scheduler.start();
+  el("mode")?.addEventListener("command", restart);
+  el("interval")?.addEventListener("change", restart);
 }

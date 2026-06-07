@@ -6,6 +6,7 @@ import {
 import { createZToolkit } from "./utils/ztoolkit";
 import { log } from "./utils/log";
 import * as ui from "./modules/ui";
+import * as scheduler from "./modules/scheduler";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
 const BUILD = "M2-pull-annotations";
@@ -24,6 +25,7 @@ async function onStartup() {
   // registered once — not per window).
   await registerPrefPane();
   ui.registerSection();
+  scheduler.start();
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -53,6 +55,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  scheduler.stop();
   ui.unregisterAllWindows();
   ui.unregisterSection();
   ztoolkit.unregisterAll();
