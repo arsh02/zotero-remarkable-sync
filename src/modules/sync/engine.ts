@@ -229,17 +229,12 @@ export async function pullAll(
         : new Uint8Array();
       const size = readPdfPageSize(bytes);
 
-      const newKeys = await applyAnnotations(
-        att as Zotero.Item,
-        pages,
-        size,
-        rec.annotationKeys ?? [],
-      );
+      const newKeys = await applyAnnotations(att as Zotero.Item, pages, size);
 
       const updated: SyncRecord = {
         ...rec,
         lastPulledVersion: entry.hash,
-        annotationKeys: newKeys,
+        annotationKeys: [...(rec.annotationKeys ?? []), ...newKeys],
       };
       await setRecord(attKey, updated);
       summary.updated++;
@@ -254,6 +249,38 @@ export async function pullAll(
   }
   progress?.("", 100);
   return summary;
+}
+
+/**
+ * Erase every annotation this plugin has created (across all synced
+ * attachments) and reset the pull state, so the next pull recreates them. Used
+ * to clean up after a geometry change or as a manual reset. Only removes our own
+ * annotations — never the user's.
+ */
+export async function clearPulledAnnotations(): Promise<number> {
+  let removed = 0;
+  const records = await allRecords();
+  for (const [attKey, rec] of Object.entries(records)) {
+    const libraryID = rec.libraryID ?? Zotero.Libraries.userLibraryID;
+    for (const key of rec.annotationKeys ?? []) {
+      const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+      if (item) {
+        try {
+          await (item as Zotero.Item).eraseTx();
+          removed++;
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    await setRecord(attKey, {
+      ...rec,
+      annotationKeys: [],
+      lastPulledVersion: undefined,
+    });
+  }
+  log(`clearPulledAnnotations: removed ${removed}`);
+  return removed;
 }
 
 /** Tag the given regular items so they are included in sync. */

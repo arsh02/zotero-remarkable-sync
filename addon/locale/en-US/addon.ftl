@@ -3,6 +3,7 @@ startup-finish = reMarkable Sync is ready
 
 menuitem-sync-now = reMarkable: Sync now
 menuitem-force-pull = reMarkable: Force re-pull annotations
+menuitem-clear-pulled = reMarkable: Remove pulled annotations
 menuitem-add-to-sync = reMarkable: Add to sync
 menuitem-remove-from-sync = reMarkable: Remove from sync
 
@@ -14,4 +15,5 @@ sync-now = Sync now
 sync-running = Syncing…
 sync-done = Pushed { $pushed }, skipped { $skipped }, failed { $failed }
 sync-complete = Pushed { $pushed } · pulled { $annotations } annotation(s)
+clear-done = Removed { $count } pulled annotation(s)
 sync-error = reMarkable sync error: { $error }

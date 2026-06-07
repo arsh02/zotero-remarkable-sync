@@ -24,6 +24,7 @@ const ELEMENT_IDS = [
   `${ID}-style`,
   `${ID}-tools-syncnow`,
   `${ID}-tools-forcepull`,
+  `${ID}-tools-clearpulled`,
   `${ID}-sep`,
   `${ID}-add`,
   `${ID}-remove`,
@@ -133,6 +134,32 @@ export async function runForcePull(): Promise<void> {
   }
 }
 
+/** Remove all plugin-created annotations and reset pull state (manual reset). */
+export async function runClearPulled(): Promise<void> {
+  const pw = new ztoolkit.ProgressWindow(config.addonName, {
+    closeOnClick: true,
+    closeTime: -1,
+  })
+    .createLine({ text: getString("sync-running"), progress: 50 })
+    .show();
+  try {
+    const removed = await engine.clearPulledAnnotations();
+    pw.changeLine({
+      progress: 100,
+      text: getString("clear-done", { args: { count: removed } }),
+    });
+    pw.startCloseTimer(5000);
+  } catch (e) {
+    log("runClearPulled error:", e);
+    pw.changeLine({
+      type: "fail",
+      progress: 100,
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
+    });
+    pw.startCloseTimer(8000);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-window UI (toolbar button, Tools menu, context menu)
 // ---------------------------------------------------------------------------
@@ -191,6 +218,14 @@ function registerToolsMenu(win: Window): void {
       "tools-forcepull",
       getString("menuitem-force-pull"),
       () => void runForcePull(),
+    ),
+  );
+  toolsPopup.appendChild(
+    makeMenuitem(
+      doc,
+      "tools-clearpulled",
+      getString("menuitem-clear-pulled"),
+      () => void runClearPulled(),
     ),
   );
 }
