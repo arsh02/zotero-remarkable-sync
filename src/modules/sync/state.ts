@@ -19,6 +19,8 @@ export interface SyncRecord {
   lastPulledVersion?: string;
   /** keys of annotations created on the last pull (for idempotent re-pull) */
   annotationKeys?: string[];
+  /** keys of Zotero annotations already pushed to the device (avoid re-push) */
+  pushedKeys?: string[];
 }
 
 type StateMap = Record<string, SyncRecord>;

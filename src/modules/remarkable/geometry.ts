@@ -61,6 +61,44 @@ export function rectToZotero(
   ];
 }
 
+// --- inverse direction (Zotero PDF points -> reMarkable units) --------------
+
+/** Inverse of rmToPdf: PDF point [x,y] (bottom-left) -> reMarkable (x, y). */
+export function pdfToRm(
+  x: number,
+  y: number,
+  page: PdfPageSize,
+): [number, number] {
+  const rmX = (x - page.width / 2) / PT_PER_RM;
+  const rmY = (page.height - y) / PT_PER_RM;
+  return [rmX, rmY];
+}
+
+/** Inverse of rectToZotero: Zotero rect [x1,y1,x2,y2] -> reMarkable RmRect. */
+export function zoteroRectToRm(
+  rect: [number, number, number, number],
+  page: PdfPageSize,
+): RmRect {
+  const [ax, ay] = pdfToRm(rect[0], rect[3], page); // top-left (uses upper y)
+  const [bx, by] = pdfToRm(rect[2], rect[1], page); // bottom-right (lower y)
+  return { x: ax, y: ay, w: bx - ax, h: by - ay };
+}
+
+/** Inverse of strokeToPath: flat Zotero path -> reMarkable points. */
+export function zoteroPathToRm(path: number[], page: PdfPageSize): RmPoint[] {
+  const pts: RmPoint[] = [];
+  for (let i = 0; i + 1 < path.length; i += 2) {
+    const [x, y] = pdfToRm(path[i], path[i + 1], page);
+    pts.push({ x, y });
+  }
+  return pts;
+}
+
+/** Inverse of inkWidth: PDF width -> reMarkable per-point width. */
+export function pdfWidthToRm(pdfWidth: number): number {
+  return Math.max(1, Math.round(pdfWidth / 0.0945));
+}
+
 /** Convert a stroke's points to a flat Zotero ink path [x1,y1,x2,y2,...]. */
 export function strokeToPath(points: RmPoint[], page: PdfPageSize): number[] {
   const out: number[] = [];

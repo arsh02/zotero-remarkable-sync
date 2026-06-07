@@ -8,6 +8,7 @@ import { config } from "../../package.json";
 import { getString, getLocaleID } from "../utils/locale";
 import { log, errMsg } from "../utils/log";
 import * as engine from "./sync/engine";
+import { pushAnnotations } from "./sync/push";
 import * as client from "./remarkable/client";
 
 // 96px icon (manifest/install). For in-app UI we use a small 32px variant so
@@ -23,6 +24,7 @@ const ELEMENT_IDS = [
   `${ID}-tb-syncnow`,
   `${ID}-style`,
   `${ID}-tools-syncnow`,
+  `${ID}-tools-push`,
   `${ID}-tools-forcepull`,
   `${ID}-tools-clearpulled`,
   `${ID}-sep`,
@@ -134,6 +136,42 @@ export async function runForcePull(): Promise<void> {
   }
 }
 
+/** Push Zotero-origin annotations to the reMarkable device. */
+export async function runPush(): Promise<void> {
+  if (!client.isConnected()) {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: getString("status-not-connected"), type: "fail" })
+      .show(4000);
+    return;
+  }
+  const pw = new ztoolkit.ProgressWindow(config.addonName, {
+    closeOnClick: true,
+    closeTime: -1,
+  })
+    .createLine({ text: getString("sync-running"), progress: 0 })
+    .show();
+  try {
+    const summary = await pushAnnotations((text, pct) =>
+      pw.changeLine({ progress: pct, text }),
+    );
+    pw.changeLine({
+      progress: 100,
+      text: getString("push-done", {
+        args: { pushed: summary.pushed, skipped: summary.skipped },
+      }),
+    });
+    pw.startCloseTimer(6000);
+  } catch (e) {
+    log("runPush error:", e);
+    pw.changeLine({
+      type: "fail",
+      progress: 100,
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
+    });
+    pw.startCloseTimer(8000);
+  }
+}
+
 /** Remove all plugin-created annotations and reset pull state (manual reset). */
 export async function runClearPulled(): Promise<void> {
   const pw = new ztoolkit.ProgressWindow(config.addonName, {
@@ -210,6 +248,14 @@ function registerToolsMenu(win: Window): void {
       "tools-syncnow",
       getString("menuitem-sync-now"),
       () => void runSyncNow(),
+    ),
+  );
+  toolsPopup.appendChild(
+    makeMenuitem(
+      doc,
+      "tools-push",
+      getString("menuitem-push"),
+      () => void runPush(),
     ),
   );
   toolsPopup.appendChild(

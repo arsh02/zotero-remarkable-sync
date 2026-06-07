@@ -254,7 +254,26 @@ export function writeItems(
   const w = new Writer();
   w.bytes(utf8Encode(HEADER_V6));
 
-  let left = opts.afterId ?? END_MARKER;
+  writeChain(
+    w,
+    strokes,
+    highlights,
+    layerNode,
+    ids,
+    opts.afterId ?? END_MARKER,
+  );
+  return w.result();
+}
+
+function writeChain(
+  w: Writer,
+  strokes: RmStroke[],
+  highlights: RmHighlight[],
+  layerNode: CrdtId,
+  ids: IdGen,
+  start: CrdtId,
+): void {
+  let left = start;
   for (const hl of highlights) {
     const item = ids.next();
     writeGlyphItem(w, hl, { parent: layerNode, item, left, right: END_MARKER });
@@ -270,5 +289,32 @@ export function writeItems(
     });
     left = item;
   }
-  return w.result();
+}
+
+/**
+ * Append new item blocks (no header) onto an existing real `.rm` page, reusing
+ * its layer and chaining after its last item. Keeps the page's device-valid
+ * structure intact while adding our annotations.
+ */
+export function encodeAppend(
+  existing: Uint8Array,
+  strokes: RmStroke[],
+  highlights: RmHighlight[],
+  meta: { layerId: CrdtId; lastItemId?: CrdtId; author: number },
+): Uint8Array {
+  const w = new Writer();
+  const ids = new IdGen(meta.author);
+  writeChain(
+    w,
+    strokes,
+    highlights,
+    meta.layerId,
+    ids,
+    meta.lastItemId ?? END_MARKER,
+  );
+  const items = w.result();
+  const out = new Uint8Array(existing.length + items.length);
+  out.set(existing, 0);
+  out.set(items, existing.length);
+  return out;
 }

@@ -55,9 +55,20 @@ export interface RmHighlight {
   rects: RmRect[];
 }
 
+export interface CrdtId {
+  part1: number;
+  part2: number;
+}
+
 export interface RmPage {
   strokes: RmStroke[];
   highlights: RmHighlight[];
+  /** the layer node items are parented to (for appending new items) */
+  layerId?: CrdtId;
+  /** the last item's id in document order (chain new items after this) */
+  lastItemId?: CrdtId;
+  /** highest author part1 seen across item ids (mint new ids above this) */
+  maxAuthor: number;
 }
 
 const HIGHLIGHTER_TOOLS = new Set([5, 18]); // HIGHLIGHTER_1, HIGHLIGHTER_2
@@ -156,10 +167,11 @@ class Reader {
     this.pos += t.size;
   }
 
-  readId(index: number): void {
+  readId(index: number): CrdtId {
     this.expectTag(index, TAG_ID);
-    this.u8(); // part1
-    this.varuint(); // part2
+    const part1 = this.u8();
+    const part2 = this.varuint();
+    return { part1, part2 };
   }
   readInt(index: number): number {
     this.expectTag(index, TAG_B4);
@@ -227,13 +239,20 @@ function utf8Decode(bytes: Uint8Array): string {
   return out;
 }
 
-/** Read the common SceneItem header; returns deletedLength (>0 ⇒ deleted). */
-function readItemHeader(r: Reader): number {
-  r.readId(1); // parent_id
-  r.readId(2); // item_id
+interface ItemHeader {
+  parent: CrdtId;
+  item: CrdtId;
+  deleted: number;
+}
+
+/** Read the common SceneItem header. */
+function readItemHeader(r: Reader): ItemHeader {
+  const parent = r.readId(1);
+  const item = r.readId(2);
   r.readId(3); // left_id
   r.readId(4); // right_id
-  return r.readInt(5); // deleted_length
+  const deleted = r.readInt(5);
+  return { parent, item, deleted };
 }
 
 function parseLine(r: Reader, version: number): RmStroke {
@@ -317,6 +336,9 @@ function parseGlyph(r: Reader): RmHighlight {
 export function parseRmPage(bytes: Uint8Array): RmPage {
   const strokes: RmStroke[] = [];
   const highlights: RmHighlight[] = [];
+  let layerId: CrdtId | undefined;
+  let lastItemId: CrdtId | undefined;
+  let maxAuthor = 0;
 
   const r = new Reader(bytes);
   const header = utf8Decode(bytes.subarray(0, HEADER_V6.length));
@@ -337,23 +359,22 @@ export function parseRmPage(bytes: Uint8Array): RmPage {
     if (blockEnd > r.length) break; // truncated
 
     try {
-      if (blockType === BLOCK_LINE) {
-        const deleted = readItemHeader(r);
-        if (deleted === 0 && r.checkTag(6, TAG_LEN4)) {
+      if (blockType === BLOCK_LINE || blockType === BLOCK_GLYPH) {
+        const hdr = readItemHeader(r);
+        if (!layerId) layerId = hdr.parent;
+        lastItemId = hdr.item;
+        maxAuthor = Math.max(maxAuthor, hdr.item.part1, hdr.parent.part1);
+        if (hdr.deleted === 0 && r.checkTag(6, TAG_LEN4)) {
           const end = r.subblock(6);
-          r.u8(); // item_type (==3)
-          const stroke = parseLine(r, currentVersion);
+          r.u8(); // item_type
+          if (blockType === BLOCK_LINE) {
+            const stroke = parseLine(r, currentVersion);
+            if (stroke.points.length) strokes.push(stroke);
+          } else {
+            const hl = parseGlyph(r);
+            if (hl.rects.length) highlights.push(hl);
+          }
           r.position = end;
-          if (stroke.points.length) strokes.push(stroke);
-        }
-      } else if (blockType === BLOCK_GLYPH) {
-        const deleted = readItemHeader(r);
-        if (deleted === 0 && r.checkTag(6, TAG_LEN4)) {
-          const end = r.subblock(6);
-          r.u8(); // item_type (==1)
-          const hl = parseGlyph(r);
-          r.position = end;
-          if (hl.rects.length) highlights.push(hl);
         }
       }
     } catch {
@@ -363,5 +384,5 @@ export function parseRmPage(bytes: Uint8Array): RmPage {
     r.position = blockEnd; // always realign to the next block
   }
 
-  return { strokes, highlights };
+  return { strokes, highlights, layerId, lastItemId, maxAuthor };
 }

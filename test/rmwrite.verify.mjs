@@ -11,7 +11,9 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { parseRmPage } = await import(join(root, ".scaffold/rmlines.mjs"));
-const { writeItems } = await import(join(root, ".scaffold/rmwrite.mjs"));
+const { writeItems, encodeAppend } = await import(
+  join(root, ".scaffold/rmwrite.mjs")
+);
 
 const approx = (a, b, eps = 1e-3) =>
   assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -138,6 +140,34 @@ for (const name of [
   }
 }
 
+// --- append to a real page: original items preserved + new one added ---
+{
+  const bytes = new Uint8Array(
+    readFileSync(join(root, "test/fixtures/rm", "Normal_A_stroke_2_layers.rm")),
+  );
+  const orig = parseRmPage(bytes);
+  assert.ok(orig.layerId, "fixture should expose a layerId");
+  const newStroke = {
+    tool: 17,
+    colorIndex: 0,
+    thickness: 2,
+    pointWidth: 16,
+    isHighlighter: false,
+    points: [
+      { x: 5, y: 5 },
+      { x: 6, y: 6 },
+    ],
+  };
+  const appended = encodeAppend(bytes, [newStroke], [], {
+    layerId: orig.layerId,
+    lastItemId: orig.lastItemId,
+    author: orig.maxAuthor + 1,
+  });
+  const re = parseRmPage(appended);
+  assert.equal(re.strokes.length, orig.strokes.length + 1, "appended stroke");
+  approx(re.strokes[0].points[0].x, orig.strokes[0].points[0].x);
+}
+
 console.log(
-  "✓ rmwrite round-trips through the parser (synthetic + 3 real fixtures)",
+  "✓ rmwrite round-trips through the parser (synthetic + 3 fixtures + append)",
 );

@@ -6,6 +6,12 @@
 import type { RemarkableApi, DocumentContent } from "rmapi-js";
 import { parseRmPage, type RmPage } from "./rmlines";
 
+export interface PageRef {
+  pageUuid: string;
+  /** the page's existing .rm file entry, if it has one */
+  rmEntry?: { id: string; hash: string };
+}
+
 export interface RmDocPage {
   /** 0-based PDF page index this annotation layer belongs to */
   pdfPageIndex: number;
@@ -91,4 +97,49 @@ export async function fetchAnnotations(
   }
 
   return { pages, content };
+}
+
+/**
+ * Map each PDF page index to its reMarkable page uuid and existing `.rm` entry
+ * (if any). Used by the push side to know which page file to modify.
+ */
+export async function mapPdfPages(
+  api: RemarkableApi,
+  id: string,
+  hash: string,
+): Promise<Map<number, PageRef>> {
+  const { entries } = await api.raw.getEntries(`${id}.docSchema`, hash);
+  const contentEnt = entries.find((e) => e.id.endsWith(".content"));
+  let content: DocumentContent | null = null;
+  if (contentEnt) {
+    try {
+      content = (await api.raw.getContent(
+        contentEnt.id,
+        contentEnt.hash,
+      )) as DocumentContent;
+    } catch {
+      content = null;
+    }
+  }
+
+  const rmByPage = new Map<string, { id: string; hash: string }>();
+  for (const e of entries) {
+    if (e.id.endsWith(".rm")) {
+      const base = e.id.slice(0, -3).split("/").pop()!;
+      rmByPage.set(base, { id: e.id, hash: e.hash });
+    }
+  }
+
+  const pageIds = orderedPageIds(content);
+  const redirect = content?.redirectionPageMap;
+  const byPdfIndex = new Map<number, PageRef>();
+  for (let i = 0; i < pageIds.length; i++) {
+    const mapped = redirect?.[i];
+    const pdfPageIndex = typeof mapped === "number" && mapped >= 0 ? mapped : i;
+    byPdfIndex.set(pdfPageIndex, {
+      pageUuid: pageIds[i],
+      rmEntry: rmByPage.get(pageIds[i]),
+    });
+  }
+  return byPdfIndex;
 }
