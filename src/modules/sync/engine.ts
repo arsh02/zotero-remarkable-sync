@@ -3,6 +3,7 @@
 
 import { getPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
+import { log, errMsg } from "../../utils/log";
 import * as client from "../remarkable/client";
 import { getRecord, setRecord, removeRecord, type SyncRecord } from "./state";
 
@@ -15,7 +16,8 @@ export interface SyncSummary {
   errors: string[];
 }
 
-export type ProgressFn = (done: number, total: number, label: string) => void;
+/** Report progress to the UI: a status line and a 0-100 percentage. */
+export type ProgressFn = (text: string, pct: number) => void;
 
 export function getSyncTag(): string {
   return (getPref("syncTag") || "@remarkable").toString();
@@ -76,20 +78,35 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
     errors: [],
   };
 
+  log("pushAll: start");
   const items = await findSyncItems();
   const attachments = pdfAttachmentsOf(items);
-  if (attachments.length === 0) return summary;
+  log(`pushAll: ${attachments.length} PDF attachment(s) tagged`);
+  if (attachments.length === 0) {
+    progress?.("Nothing tagged to sync", 100);
+    return summary;
+  }
 
+  progress?.("Authenticating with reMarkable…", 0);
+  log("pushAll: getApi() …");
   const api = await client.getApi();
-  const folderId = await client.ensureFolder(api, getPref("folder") || "");
+  log("pushAll: getApi() ok");
+
+  progress?.("Resolving reMarkable folder…", 0);
+  const folder = getPref("folder") || "";
+  log(`pushAll: ensureFolder("${folder}") …`);
+  const folderId = await client.ensureFolder(api, folder);
+  log(`pushAll: folderId="${folderId}"`);
 
   let done = 0;
   for (const att of attachments) {
     const name = displayNameFor(att);
-    progress?.(done, attachments.length, name);
+    const pct = Math.round((done / attachments.length) * 100);
+    progress?.(`Uploading ${name}`, pct);
     try {
       const path = await att.getFilePathAsync();
       if (!path) {
+        log(`pushAll: skip "${name}" (no file path)`);
         summary.skipped++;
         done++;
         continue;
@@ -99,11 +116,13 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
 
       const existing = await getRecord(att.key);
       if (existing && existing.fileHash === fileHash) {
+        log(`pushAll: skip "${name}" (unchanged)`);
         summary.skipped++;
         done++;
         continue;
       }
 
+      log(`pushAll: uploading "${name}" (${bytes.length} bytes) …`);
       const entry = await client.uploadPdf(api, name, bytes, folderId);
       const record: SyncRecord = {
         docId: entry.id,
@@ -114,14 +133,19 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
         lastPulledVersion: existing?.lastPulledVersion,
       };
       await setRecord(att.key, record);
+      log(`pushAll: uploaded "${name}" -> ${entry.id}`);
       summary.pushed++;
     } catch (e) {
+      log(`pushAll: FAILED "${name}": ${errMsg(e)}`);
       summary.failed++;
-      summary.errors.push(`${name}: ${(e as Error).message ?? e}`);
+      summary.errors.push(`${name}: ${errMsg(e)}`);
     }
     done++;
   }
-  progress?.(done, attachments.length, "");
+  log(
+    `pushAll: done (pushed=${summary.pushed} skipped=${summary.skipped} failed=${summary.failed})`,
+  );
+  progress?.("", 100);
   return summary;
 }
 

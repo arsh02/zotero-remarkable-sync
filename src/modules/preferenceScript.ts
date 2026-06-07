@@ -3,6 +3,19 @@ import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
 import * as client from "./remarkable/client";
 
+/**
+ * Register the plugin's preference pane so it appears in Zotero Settings.
+ * Auto-unregistered by Zotero on plugin shutdown.
+ */
+export async function registerPrefPane() {
+  await Zotero.PreferencePanes.register({
+    pluginID: config.addonID,
+    src: rootURI + "content/preferences.xhtml",
+    label: config.addonName,
+    image: `chrome://${config.addonRef}/content/icons/favicon.png`,
+  });
+}
+
 export async function registerPrefsScripts(_window: Window) {
   // Called when the prefs pane is opened (see preferences.xhtml onload).
   if (!addon.data.prefs) {

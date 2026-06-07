@@ -17,3 +17,5 @@ tsconfig.tsbuildinfo
 .scaffold
 build
 logs
+# Local dev profile/data for zotero-plugin serve
+.dev

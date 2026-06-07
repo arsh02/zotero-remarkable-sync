@@ -1,5 +1,8 @@
 import { initLocale } from "./utils/locale";
-import { registerPrefsScripts } from "./modules/preferenceScript";
+import {
+  registerPrefPane,
+  registerPrefsScripts,
+} from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import * as ui from "./modules/ui";
 
@@ -12,7 +15,9 @@ async function onStartup() {
 
   initLocale();
 
-  // Item-pane status section is global (registered once, not per window).
+  // Register the Settings pane and the item-pane status section (both global,
+  // registered once — not per window).
+  await registerPrefPane();
   ui.registerSection();
 
   await Promise.all(
@@ -32,12 +37,12 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
 
-  // Register the native item context-menu for this window.
-  ui.registerMenu(win);
+  // Register this window's UI: toolbar button, Tools menu, context menu.
+  ui.registerWindowUI(win);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-  ui.unregisterMenu(win);
+  ui.unregisterWindowUI(win);
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }

@@ -1,22 +1,27 @@
-// UI surface for the plugin: a native item context-menu (Add / Remove / Sync
-// now), an item-pane status section with toggle + sync buttons, and the
-// progress-window runner shared by both.
+// UI surface for the plugin:
+//  - a toolbar button + Tools-menu item for "Sync now",
+//  - a native item context-menu for Add / Remove from sync,
+//  - an item-pane status section with toggle + sync buttons,
+//  - the progress-window runner shared by all of them.
 
 import { config } from "../../package.json";
 import { getString, getLocaleID } from "../utils/locale";
+import { log, errMsg } from "../utils/log";
 import * as engine from "./sync/engine";
 import * as client from "./remarkable/client";
 
 const ICON = `chrome://${config.addonRef}/content/icons/favicon.png`;
-const MENU_ID = `${config.addonRef}-itemmenu`;
+const ID = `${config.addonRef}`;
 const SECTION_ID = `${config.addonRef}-status`;
 
-interface WindowMenus {
-  menu: Element;
+interface WindowUI {
+  /** elements to remove on teardown */
   nodes: Element[];
-  onShowing: (e: Event) => void;
+  /** the item context menu and its popupshowing listener, for removal */
+  itemmenu?: Element;
+  onShowing?: (e: Event) => void;
 }
-const menuRegistry = new Map<Window, WindowMenus>();
+const registry = new Map<Window, WindowUI>();
 let sectionRegistered = false;
 
 // ---------------------------------------------------------------------------
@@ -45,9 +50,8 @@ export async function runSyncNow(): Promise<void> {
     .show();
 
   try {
-    const summary = await engine.pushAll((done, total, label) => {
-      const pct = total ? Math.round((done / total) * 100) : 100;
-      pw.changeLine({ progress: pct, text: `[${pct}%] ${label}` });
+    const summary = await engine.pushAll((text, pct) => {
+      pw.changeLine({ progress: pct, text });
     });
     pw.changeLine({
       progress: 100,
@@ -61,17 +65,18 @@ export async function runSyncNow(): Promise<void> {
     });
     pw.startCloseTimer(5000);
   } catch (e) {
+    log("runSyncNow error:", e);
     pw.changeLine({
       type: "fail",
       progress: 100,
-      text: getString("sync-error", { args: { error: (e as Error).message } }),
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
     });
     pw.startCloseTimer(8000);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Context menu (native DOM, since toolkit v5 has no Menu manager)
+// Per-window UI (toolbar button, Tools menu, context menu)
 // ---------------------------------------------------------------------------
 
 function makeMenuitem(
@@ -81,26 +86,58 @@ function makeMenuitem(
   onCommand: () => void,
 ): Element {
   const item = (doc as any).createXULElement("menuitem") as Element;
-  item.id = `${MENU_ID}-${suffix}`;
+  item.id = `${ID}-${suffix}`;
   item.setAttribute("label", label);
   item.addEventListener("command", onCommand);
   return item;
 }
 
-export function registerMenu(win: Window): void {
+function registerToolbarButton(win: Window, nodes: Element[]): void {
+  const doc = win.document;
+  const toolbar = doc.getElementById("zotero-items-toolbar");
+  if (!toolbar) return;
+  const btn = (doc as any).createXULElement("toolbarbutton") as Element;
+  btn.id = `${ID}-tb-syncnow`;
+  btn.setAttribute("class", "zotero-tb-button");
+  btn.setAttribute("tooltiptext", getString("menuitem-sync-now"));
+  btn.setAttribute("image", ICON);
+  btn.addEventListener("command", () => void runSyncNow());
+  toolbar.appendChild(btn);
+  nodes.push(btn);
+}
+
+function registerToolsMenu(win: Window, nodes: Element[]): void {
+  const doc = win.document;
+  const toolsPopup = doc.getElementById("menu_ToolsPopup");
+  if (!toolsPopup) return;
+  const item = makeMenuitem(
+    doc,
+    "tools-syncnow",
+    getString("menuitem-sync-now"),
+    () => void runSyncNow(),
+  );
+  toolsPopup.appendChild(item);
+  nodes.push(item);
+}
+
+function registerContextMenu(
+  win: Window,
+  nodes: Element[],
+): { itemmenu?: Element; onShowing?: (e: Event) => void } {
   const doc = win.document;
   const itemmenu = doc.getElementById("zotero-itemmenu");
-  if (!itemmenu || menuRegistry.has(win)) return;
+  if (!itemmenu) return {};
 
   const sep = (doc as any).createXULElement("menuseparator") as Element;
-  sep.id = `${MENU_ID}-sep`;
-
+  sep.id = `${ID}-sep`;
   const addItem = makeMenuitem(
     doc,
     "add",
     getString("menuitem-add-to-sync"),
     () => {
-      void engine.addToSync(selectedRegularItems(win));
+      engine
+        .addToSync(selectedRegularItems(win))
+        .catch((e) => log("addToSync error:", e));
     },
   );
   const removeItem = makeMenuitem(
@@ -108,20 +145,17 @@ export function registerMenu(win: Window): void {
     "remove",
     getString("menuitem-remove-from-sync"),
     () => {
-      void engine.removeFromSync(selectedRegularItems(win));
-    },
-  );
-  const syncItem = makeMenuitem(
-    doc,
-    "syncnow",
-    getString("menuitem-sync-now"),
-    () => {
-      void runSyncNow();
+      engine
+        .removeFromSync(selectedRegularItems(win))
+        .catch((e) => log("removeFromSync error:", e));
     },
   );
 
-  const nodes = [sep, addItem, removeItem, syncItem];
-  nodes.forEach((n) => itemmenu.appendChild(n));
+  const menuNodes = [sep, addItem, removeItem];
+  menuNodes.forEach((n) => {
+    itemmenu.appendChild(n);
+    nodes.push(n);
+  });
 
   const onShowing = () => {
     const items = selectedRegularItems(win);
@@ -133,15 +167,26 @@ export function registerMenu(win: Window): void {
   };
   itemmenu.addEventListener("popupshowing", onShowing);
 
-  menuRegistry.set(win, { menu: itemmenu, nodes, onShowing });
+  return { itemmenu, onShowing };
 }
 
-export function unregisterMenu(win: Window): void {
-  const reg = menuRegistry.get(win);
+export function registerWindowUI(win: Window): void {
+  if (registry.has(win)) return;
+  const nodes: Element[] = [];
+  registerToolbarButton(win, nodes);
+  registerToolsMenu(win, nodes);
+  const { itemmenu, onShowing } = registerContextMenu(win, nodes);
+  registry.set(win, { nodes, itemmenu, onShowing });
+}
+
+export function unregisterWindowUI(win: Window): void {
+  const reg = registry.get(win);
   if (!reg) return;
-  reg.menu.removeEventListener("popupshowing", reg.onShowing);
+  if (reg.itemmenu && reg.onShowing) {
+    reg.itemmenu.removeEventListener("popupshowing", reg.onShowing);
+  }
   reg.nodes.forEach((n) => n.remove());
-  menuRegistry.delete(win);
+  registry.delete(win);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,9 +239,13 @@ function renderSection(
     ? getString("menuitem-remove-from-sync")
     : getString("menuitem-add-to-sync");
   toggle.addEventListener("click", async () => {
-    if (synced) await engine.removeFromSync([item]);
-    else await engine.addToSync([item]);
-    renderSection(body, item, doc);
+    try {
+      if (synced) await engine.removeFromSync([item]);
+      else await engine.addToSync([item]);
+      renderSection(body, item, doc);
+    } catch (e) {
+      log("toggle sync error:", e);
+    }
   });
   body.appendChild(toggle);
 

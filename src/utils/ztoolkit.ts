@@ -15,9 +15,11 @@ function createZToolkit() {
 }
 
 function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
-  const env = __env__;
   _ztoolkit.basicOptions.log.prefix = `[${config.addonName}]`;
-  _ztoolkit.basicOptions.log.disableConsole = env === "production";
+  // Always disable the toolkit console logger: on Zotero 9 it initialises a
+  // ConsoleAPI via the removed `ChromeUtils.import`, which throws. We log via
+  // src/utils/log.ts (Zotero.debug) instead.
+  _ztoolkit.basicOptions.log.disableConsole = true;
   _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = __env__ === "development";
   _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = __env__ === "development";
   // Getting basicOptions.debug will load global modules like the debug bridge.
