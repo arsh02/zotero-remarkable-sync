@@ -30,6 +30,7 @@ export type FluentMessageId =
   | 'status-not-connected'
   | 'status-not-synced'
   | 'status-synced'
+  | 'sync-complete'
   | 'sync-done'
   | 'sync-error'
   | 'sync-now'

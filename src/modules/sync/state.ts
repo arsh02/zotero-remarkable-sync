@@ -11,10 +11,14 @@ export interface SyncRecord {
   fileHash: string;
   /** name shown on the device */
   visibleName: string;
+  /** Zotero library the attachment lives in (defaults to user library) */
+  libraryID?: number;
   /** epoch ms of last successful push */
   lastPushed: number;
-  /** reMarkable version last pulled (for annotation sync, M2) */
+  /** reMarkable doc hash last pulled (skip pull when unchanged) */
   lastPulledVersion?: string;
+  /** keys of annotations created on the last pull (for idempotent re-pull) */
+  annotationKeys?: string[];
 }
 
 type StateMap = Record<string, SyncRecord>;

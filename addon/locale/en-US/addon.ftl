@@ -12,4 +12,5 @@ status-not-connected = Not connected to reMarkable. Connect in the plugin prefer
 sync-now = Sync now
 sync-running = Syncing…
 sync-done = Pushed { $pushed }, skipped { $skipped }, failed { $failed }
+sync-complete = Pushed { $pushed } · pulled { $annotations } annotation(s)
 sync-error = reMarkable sync error: { $error }

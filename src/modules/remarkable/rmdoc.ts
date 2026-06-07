@@ -1,0 +1,94 @@
+// Download a reMarkable document's annotation layers: list its files via the
+// raw API, read the `.content` to get the ordered page list and the
+// redirectionPageMap (reMarkable page -> PDF page), then fetch and parse each
+// `{pageUuid}.rm` scene file.
+
+import type { RemarkableApi, DocumentContent } from "rmapi-js";
+import { parseRmPage, type RmPage } from "./rmlines";
+
+export interface RmDocPage {
+  /** 0-based PDF page index this annotation layer belongs to */
+  pdfPageIndex: number;
+  /** parsed strokes + highlights */
+  page: RmPage;
+}
+
+export interface RmDocAnnotations {
+  pages: RmDocPage[];
+  content: DocumentContent | null;
+}
+
+/** Ordered list of page UUIDs for a document. */
+function orderedPageIds(content: DocumentContent | null): string[] {
+  if (!content) return [];
+  if (Array.isArray(content.pages) && content.pages.length) {
+    return content.pages;
+  }
+  const cpages = content.cPages?.pages;
+  if (cpages?.length) {
+    return cpages
+      .filter((p) => !p.deleted || p.deleted.value === 0)
+      .map((p) => p.id);
+  }
+  return [];
+}
+
+/**
+ * Fetch and parse every annotated page of a reMarkable document.
+ *
+ * @param api authenticated rmapi-js instance
+ * @param id document id (uuid)
+ * @param hash current document hash (from listItems)
+ */
+export async function fetchAnnotations(
+  api: RemarkableApi,
+  id: string,
+  hash: string,
+): Promise<RmDocAnnotations> {
+  const { entries } = await api.raw.getEntries(`${id}.docSchema`, hash);
+
+  const contentEnt = entries.find((e) => e.id.endsWith(".content"));
+  let content: DocumentContent | null = null;
+  if (contentEnt) {
+    try {
+      content = (await api.raw.getContent(
+        contentEnt.id,
+        contentEnt.hash,
+      )) as DocumentContent;
+    } catch {
+      content = null;
+    }
+  }
+
+  const pageIds = orderedPageIds(content);
+  const redirect = content?.redirectionPageMap;
+
+  // Index .rm entries by page uuid for quick lookup.
+  const rmByPage = new Map<string, { id: string; hash: string }>();
+  for (const e of entries) {
+    if (e.id.endsWith(".rm")) {
+      const base = e.id.slice(0, -3).split("/").pop()!; // strip dir + ".rm"
+      rmByPage.set(base, { id: e.id, hash: e.hash });
+    }
+  }
+
+  const pages: RmDocPage[] = [];
+  for (let i = 0; i < pageIds.length; i++) {
+    const ent = rmByPage.get(pageIds[i]);
+    if (!ent) continue; // page has no annotation layer
+    let parsed: RmPage;
+    try {
+      const bytes = await api.raw.getHash(ent.id, ent.hash);
+      parsed = parseRmPage(bytes);
+    } catch {
+      continue;
+    }
+    if (!parsed.strokes.length && !parsed.highlights.length) continue;
+
+    const mapped = redirect?.[i];
+    const pdfPageIndex = typeof mapped === "number" && mapped >= 0 ? mapped : i;
+    pages.push({ pdfPageIndex, page: parsed });
+  }
+
+  return { pages, content };
+}

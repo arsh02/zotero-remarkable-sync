@@ -5,7 +5,16 @@ import { getPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
 import { log, errMsg } from "../../utils/log";
 import * as client from "../remarkable/client";
-import { getRecord, setRecord, removeRecord, type SyncRecord } from "./state";
+import { fetchAnnotations } from "../remarkable/rmdoc";
+import { readPdfPageSize } from "../remarkable/geometry";
+import {
+  getRecord,
+  setRecord,
+  removeRecord,
+  allRecords,
+  type SyncRecord,
+} from "./state";
+import { applyAnnotations } from "./annotations";
 
 const IO = globalThis as any;
 
@@ -129,8 +138,10 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
         docHash: entry.hash,
         fileHash,
         visibleName: name,
+        libraryID: att.libraryID,
         lastPushed: Date.now(),
         lastPulledVersion: existing?.lastPulledVersion,
+        annotationKeys: existing?.annotationKeys,
       };
       await setRecord(att.key, record);
       log(`pushAll: uploaded "${name}" -> ${entry.id}`);
@@ -145,6 +156,97 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
   log(
     `pushAll: done (pushed=${summary.pushed} skipped=${summary.skipped} failed=${summary.failed})`,
   );
+  progress?.("", 100);
+  return summary;
+}
+
+export interface PullSummary {
+  updated: number;
+  annotations: number;
+  failed: number;
+  errors: string[];
+}
+
+/**
+ * Pull annotations for every synced attachment whose reMarkable document has
+ * changed since the last pull, writing them as native Zotero annotations.
+ */
+export async function pullAll(progress?: ProgressFn): Promise<PullSummary> {
+  ensureNetworkGlobals();
+  const summary: PullSummary = {
+    updated: 0,
+    annotations: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  const records = await allRecords();
+  const keys = Object.keys(records);
+  if (keys.length === 0) return summary;
+
+  const api = await client.getApi();
+  progress?.("Checking reMarkable for annotations…", 0);
+  log(`pullAll: ${keys.length} synced attachment(s)`);
+
+  // Snapshot the cloud listing once, then look up each doc by id.
+  const remote = await api.listItems(true);
+  const byId = new Map(remote.map((e) => [e.id, e]));
+
+  let done = 0;
+  for (const attKey of keys) {
+    const rec = records[attKey];
+    const pct = Math.round((done / keys.length) * 100);
+    try {
+      const libraryID = rec.libraryID ?? Zotero.Libraries.userLibraryID;
+      const att = Zotero.Items.getByLibraryAndKey(libraryID, attKey);
+      if (!att) {
+        done++;
+        continue;
+      }
+
+      const entry = byId.get(rec.docId);
+      if (!entry) {
+        done++;
+        continue;
+      }
+      if (entry.hash === rec.lastPulledVersion) {
+        done++;
+        continue; // unchanged since last pull
+      }
+
+      progress?.(`Pulling annotations: ${rec.visibleName}`, pct);
+      log(`pullAll: fetching "${rec.visibleName}" (${rec.docId})`);
+      const { pages } = await fetchAnnotations(api, rec.docId, entry.hash);
+
+      const path = await (att as Zotero.Item).getFilePathAsync();
+      const bytes: Uint8Array = path
+        ? await IO.IOUtils.read(path)
+        : new Uint8Array();
+      const size = readPdfPageSize(bytes);
+
+      const newKeys = await applyAnnotations(
+        att as Zotero.Item,
+        pages,
+        size,
+        rec.annotationKeys ?? [],
+      );
+
+      const updated: SyncRecord = {
+        ...rec,
+        lastPulledVersion: entry.hash,
+        annotationKeys: newKeys,
+      };
+      await setRecord(attKey, updated);
+      summary.updated++;
+      summary.annotations += newKeys.length;
+      log(`pullAll: "${rec.visibleName}" -> ${newKeys.length} annotation(s)`);
+    } catch (e) {
+      log(`pullAll: FAILED "${rec.visibleName}": ${errMsg(e)}`);
+      summary.failed++;
+      summary.errors.push(`${rec.visibleName}: ${errMsg(e)}`);
+    }
+    done++;
+  }
   progress?.("", 100);
   return summary;
 }

@@ -72,17 +72,14 @@ export async function runSyncNow(): Promise<void> {
     .show();
 
   try {
-    const summary = await engine.pushAll((text, pct) => {
+    const report = (text: string, pct: number) =>
       pw.changeLine({ progress: pct, text });
-    });
+    const push = await engine.pushAll(report);
+    const pull = await engine.pullAll(report);
     pw.changeLine({
       progress: 100,
-      text: getString("sync-done", {
-        args: {
-          pushed: summary.pushed,
-          skipped: summary.skipped,
-          failed: summary.failed,
-        },
+      text: getString("sync-complete", {
+        args: { pushed: push.pushed, annotations: pull.annotations },
       }),
     });
     pw.startCloseTimer(5000);
