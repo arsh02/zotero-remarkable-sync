@@ -65,10 +65,12 @@ export interface RmPage {
   highlights: RmHighlight[];
   /** the layer node items are parented to (for appending new items) */
   layerId?: CrdtId;
-  /** the last item's id in document order (chain new items after this) */
+  /** the last item id within that layer (chain new items after this) */
   lastItemId?: CrdtId;
-  /** highest author part1 seen across item ids (mint new ids above this) */
+  /** highest author part1 seen (registered author to reuse for new items) */
   maxAuthor: number;
+  /** highest part2 counter seen (mint new counters above this) */
+  maxCounter: number;
 }
 
 const HIGHLIGHTER_TOOLS = new Set([5, 18]); // HIGHLIGHTER_1, HIGHLIGHTER_2
@@ -339,6 +341,7 @@ export function parseRmPage(bytes: Uint8Array): RmPage {
   let layerId: CrdtId | undefined;
   let lastItemId: CrdtId | undefined;
   let maxAuthor = 0;
+  let maxCounter = 0;
 
   const r = new Reader(bytes);
   const header = utf8Decode(bytes.subarray(0, HEADER_V6.length));
@@ -362,8 +365,17 @@ export function parseRmPage(bytes: Uint8Array): RmPage {
       if (blockType === BLOCK_LINE || blockType === BLOCK_GLYPH) {
         const hdr = readItemHeader(r);
         if (!layerId) layerId = hdr.parent;
-        lastItemId = hdr.item;
+        // Track the last item that belongs to the chosen layer, so new items
+        // chain after a neighbour in the same CRDT sequence.
+        if (
+          layerId &&
+          hdr.parent.part1 === layerId.part1 &&
+          hdr.parent.part2 === layerId.part2
+        ) {
+          lastItemId = hdr.item;
+        }
         maxAuthor = Math.max(maxAuthor, hdr.item.part1, hdr.parent.part1);
+        maxCounter = Math.max(maxCounter, hdr.item.part2, hdr.parent.part2);
         if (hdr.deleted === 0 && r.checkTag(6, TAG_LEN4)) {
           const end = r.subblock(6);
           r.u8(); // item_type
@@ -384,5 +396,5 @@ export function parseRmPage(bytes: Uint8Array): RmPage {
     r.position = blockEnd; // always realign to the next block
   }
 
-  return { strokes, highlights, layerId, lastItemId, maxAuthor };
+  return { strokes, highlights, layerId, lastItemId, maxAuthor, maxCounter };
 }

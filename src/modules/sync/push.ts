@@ -209,10 +209,15 @@ export async function pushAnnotations(
           highlights.push(...c.highlights);
           pushedNow.push(a.key);
         }
+        // Reuse an author id already registered in the page (a new one would
+        // be ignored by the device), with counters above every existing one.
+        const author =
+          parsed.lastItemId?.part1 ?? parsed.layerId?.part1 ?? parsed.maxAuthor;
         const newBytes = encodeAppend(existing, strokes, highlights, {
           layerId: parsed.layerId,
           lastItemId: parsed.lastItemId,
-          author: parsed.maxAuthor + 1,
+          author,
+          startCounter: parsed.maxCounter + 1,
         });
         pageRm.set(ref.pageUuid, newBytes);
       }

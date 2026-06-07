@@ -284,6 +284,7 @@ export async function clearPulledAnnotations(): Promise<number> {
     await setRecord(attKey, {
       ...rec,
       annotationKeys: [],
+      pushedKeys: [],
       lastPulledVersion: undefined,
     });
   }

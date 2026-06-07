@@ -161,7 +161,8 @@ for (const name of [
   const appended = encodeAppend(bytes, [newStroke], [], {
     layerId: orig.layerId,
     lastItemId: orig.lastItemId,
-    author: orig.maxAuthor + 1,
+    author: orig.lastItemId?.part1 ?? orig.maxAuthor,
+    startCounter: orig.maxCounter + 1,
   });
   const re = parseRmPage(appended);
   assert.equal(re.strokes.length, orig.strokes.length + 1, "appended stroke");

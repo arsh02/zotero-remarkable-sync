@@ -300,10 +300,17 @@ export function encodeAppend(
   existing: Uint8Array,
   strokes: RmStroke[],
   highlights: RmHighlight[],
-  meta: { layerId: CrdtId; lastItemId?: CrdtId; author: number },
+  meta: {
+    layerId: CrdtId;
+    lastItemId?: CrdtId;
+    /** an author id already registered in the page (reuse, don't invent) */
+    author: number;
+    /** first counter to use — must be above every existing part2 */
+    startCounter: number;
+  },
 ): Uint8Array {
   const w = new Writer();
-  const ids = new IdGen(meta.author);
+  const ids = new IdGen(meta.author, meta.startCounter);
   writeChain(
     w,
     strokes,
