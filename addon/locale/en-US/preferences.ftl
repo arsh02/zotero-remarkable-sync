@@ -1,0 +1,24 @@
+pref-connection-title = reMarkable connection
+pref-connection-code = One-time code
+pref-connection-connect =
+    .label = Connect
+pref-connection-status-disconnected = Not connected. Get a code at my.remarkable.com/device/browser/connect
+pref-connection-status-connected = Connected to reMarkable cloud.
+pref-connection-status-connecting = Connecting…
+pref-connection-status-error = Connection failed: { $error }
+
+pref-sync-title = Sync
+pref-sync-tag = Sync tag
+pref-sync-folder = reMarkable folder
+pref-sync-delete-on-unsync =
+    .label = Delete from reMarkable when removed from sync
+
+pref-schedule-title = Schedule
+pref-schedule-mode = Sync mode
+pref-schedule-mode-manual =
+    .label = On demand
+pref-schedule-mode-interval =
+    .label = On a timer
+pref-schedule-interval = Interval (minutes)
+
+pref-help = { $name } Build { $version } { $time }
