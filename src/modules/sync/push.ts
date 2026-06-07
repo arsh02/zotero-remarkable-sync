@@ -53,18 +53,18 @@ function annotationToRm(
   }
   const type = item.annotationType;
   if (type === "highlight" || type === "underline") {
-    const rects = (pos.rects ?? []).map((r) =>
-      zoteroRectToRm(r as [number, number, number, number], size),
-    );
-    if (rects.length) {
-      const { index, rgba } = zoteroToRm(color, "highlight");
+    const { index, rgba } = zoteroToRm(color, "highlight");
+    const text = item.annotationText || "";
+    // Break a multi-line Zotero highlight into one GlyphRange per line so each
+    // line renders on the device. Text goes on the first; pull rejoins them.
+    (pos.rects ?? []).forEach((r, i) => {
       out.highlights.push({
-        text: item.annotationText || "",
+        text: i === 0 ? text : "",
         colorIndex: index,
         rgba,
-        rects,
+        rects: [zoteroRectToRm(r as [number, number, number, number], size)],
       });
-    }
+    });
   } else if (type === "ink") {
     const width = pdfWidthToRm(pos.width ?? 1);
     const { index } = zoteroToRm(color, "ink");

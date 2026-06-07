@@ -39,6 +39,35 @@ function colorToHex(
   return rmToZoteroHex(colorIndex, rgba);
 }
 
+/**
+ * Join consecutive same-colour GlyphRanges that sit on adjacent lines into one
+ * highlight, so a multi-line highlight becomes a single multi-rect Zotero
+ * highlight (the inverse of how push splits per line).
+ */
+function mergeHighlights(hls: RmHighlight[]): RmHighlight[] {
+  const out: RmHighlight[] = [];
+  for (const hl of hls) {
+    if (!hl.rects.length) continue;
+    const prev = out[out.length - 1];
+    const last = prev?.rects[prev.rects.length - 1];
+    const first = hl.rects[0];
+    const sameColor =
+      prev &&
+      prev.colorIndex === hl.colorIndex &&
+      JSON.stringify(prev.rgba) === JSON.stringify(hl.rgba);
+    // Next line: first rect sits just below the previous last rect.
+    const gap = last ? first.y - (last.y + last.h) : Infinity;
+    const adjacent = !!last && gap > -last.h * 0.5 && gap < last.h * 0.8;
+    if (prev && sameColor && adjacent) {
+      prev.rects.push(...hl.rects);
+      if (hl.text) prev.text = prev.text ? `${prev.text} ${hl.text}` : hl.text;
+    } else {
+      out.push({ ...hl, rects: [...hl.rects] });
+    }
+  }
+  return out;
+}
+
 function sortIndex(pageIndex: number, yFromTop: number): string {
   const top = Math.max(0, Math.min(99999, Math.round(yFromTop)));
   return [
@@ -235,7 +264,9 @@ export async function applyAnnotations(
   for (const { pdfPageIndex, page } of docPages) {
     const size = pageSizeAt(sizes, pdfPageIndex);
     const built = [
-      ...page.highlights.map((hl) => buildHighlight(pdfPageIndex, hl, size)),
+      ...mergeHighlights(page.highlights).map((hl) =>
+        buildHighlight(pdfPageIndex, hl, size),
+      ),
       ...page.strokes.map((st) =>
         st.isHighlighter
           ? buildHighlighterStroke(pdfPageIndex, st, size)
