@@ -24,6 +24,8 @@ async function updateOnce(
 ): Promise<void> {
   const raw = api.raw;
   const [rootHash, generation, schema] = await raw.getRootHash();
+  // Log a recovery snapshot before any write (the raw API can corrupt the root).
+  log(`rmupload: pre-write root=${rootHash} generation=${generation}`);
 
   const root = await raw.getEntries("root.docSchema", rootHash);
   const docEntry = root.entries.find((e) => e.id === docId);
