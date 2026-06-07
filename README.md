@@ -39,12 +39,27 @@ In the plugin preferences, paste a one-time code from
 <https://my.remarkable.com/device/browser/connect> and click **Connect**. The resulting
 device token is stored in Zotero preferences.
 
+## Usage
+
+- **Connect**: Settings → *Zotero reMarkable Sync* → paste a one-time code from
+  <https://my.remarkable.com/device/browser/connect>.
+- **Sync**: tag an item `@remarkable` (right-click → *reMarkable: Add to sync*),
+  then the toolbar **Sync now** button (or set an interval in preferences).
+- **Tools menu**: *Sync now*, *Force re-pull annotations*, *Remove pulled
+  annotations* (removes only plugin-created annotations).
+
+Annotations sync **reMarkable → Zotero** only; the Zotero side is never modified
+destructively, so you can keep annotating on the device. Text highlights become
+Zotero highlights, freehand highlighter becomes translucent highlights, and pen
+strokes become ink.
+
 ## Milestones
 
 - **M0** — scaffold, tooling, pre-commit ✅
-- **M1** — push tagged PDFs, auth, preferences, context-menu UX
-- **M2** — pull annotations back as native Zotero annotations
-- **M3** — scheduled auto-sync, conflict/dedup handling, polish
+- **M1** — push tagged PDFs, auth, preferences, context-menu UX ✅
+- **M2** — pull annotations back as native Zotero annotations ✅
+- **M3** — scheduled auto-sync ✅ · further polish ongoing
+- **Future** — Zotero → reMarkable annotation push (write `.rm` v6)
 
 ## Credits
 
