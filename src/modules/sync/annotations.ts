@@ -148,6 +148,11 @@ function buildHighlight(
 ): Pending | null {
   const rects = hl.rects.map((r) => rectToZotero(r, size));
   if (!rects.length) return null;
+  log(
+    `pull HL colorIndex=${hl.colorIndex} rgba=${JSON.stringify(hl.rgba)} text=${JSON.stringify(
+      hl.text.slice(0, 16),
+    )}`,
+  );
   const topY = Math.max(...rects.map((r) => r[3]));
   return {
     signature: sig(

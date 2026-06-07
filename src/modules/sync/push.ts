@@ -56,22 +56,21 @@ function annotationToRm(
     return out;
   }
   const type = item.annotationType;
+  const index = zoteroToRm(color);
   if (type === "highlight" || type === "underline") {
-    const { index, rgba } = zoteroToRm(color, "highlight");
     const text = item.annotationText || "";
     // Break a multi-line Zotero highlight into one GlyphRange per line so each
     // line renders on the device. Text goes on the first; pull rejoins them.
+    // No rgba: the device renders its native palette colour for `index`.
     (pos.rects ?? []).forEach((r, i) => {
       out.highlights.push({
         text: i === 0 ? text : "",
         colorIndex: index,
-        rgba,
         rects: [zoteroRectToRm(r as [number, number, number, number], size)],
       });
     });
   } else if (type === "ink") {
     const width = pdfWidthToRm(pos.width ?? 1);
-    const { index } = zoteroToRm(color, "ink");
     for (const path of pos.paths ?? []) {
       const points = zoteroPathToRm(path, size);
       if (points.length) {

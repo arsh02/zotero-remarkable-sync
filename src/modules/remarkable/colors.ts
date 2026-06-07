@@ -1,36 +1,57 @@
-// Shared colour mapping between Zotero annotations and reMarkable, so a colour
-// round-trips (push then pull yields the same Zotero colour) and the two sides
-// "match". e-ink has less contrast, so highlights pushed to the device are made
-// more transparent there (PUSH_HIGHLIGHT_ALPHA) while Zotero keeps its own
-// translucent rendering of the opaque hex.
+// Shared colour mapping between Zotero and reMarkable, used both directions so
+// colours match and round-trip. reMarkable has 6 highlighter colours (yellow,
+// green, blue, orange, pink, gray); Zotero has 8, so red/magenta collapse onto
+// pink and purple onto blue, and reMarkable pink comes back as Zotero magenta.
 
-export interface ColorEntry {
-  /** Zotero hex (its annotation palette) */
-  hex: string;
-  /** reMarkable PenColor index */
-  rmIndex: number;
-  rgb: [number, number, number];
-}
+// reMarkable PenColor indices (rmscene's enum). ORANGE is not in the public
+// spec — it's confirmed from a real pull (see the "pull HL" log) and set here.
+const RM = {
+  BLACK: 0,
+  GRAY: 1,
+  WHITE: 2,
+  YELLOW: 3,
+  GREEN: 4,
+  PINK: 5,
+  BLUE: 6,
+  RED: 7,
+  GRAY_OVERLAP: 8,
+  HIGHLIGHT: 9,
+  GREEN_2: 10,
+  CYAN: 11,
+  MAGENTA: 12,
+  YELLOW_2: 13,
+  ORANGE: 14, // TODO: confirm from a real reMarkable orange highlight
+};
 
-// Zotero's default annotation palette mapped to the nearest reMarkable PenColor.
-const COLORS: ColorEntry[] = [
-  { hex: "#ffd400", rmIndex: 3, rgb: [255, 212, 0] }, // yellow
-  { hex: "#5fb236", rmIndex: 4, rgb: [95, 178, 54] }, // green
-  { hex: "#ff6666", rmIndex: 5, rgb: [255, 102, 102] }, // pink/red
-  { hex: "#2ea8e5", rmIndex: 6, rgb: [46, 168, 229] }, // blue
-  { hex: "#e56eee", rmIndex: 12, rgb: [229, 110, 238] }, // magenta
-  { hex: "#a28ae5", rmIndex: 6, rgb: [162, 138, 229] }, // purple ~ blue
-  { hex: "#f19837", rmIndex: 7, rgb: [241, 152, 55] }, // orange ~ red
-  { hex: "#aaaaaa", rmIndex: 1, rgb: [170, 170, 170] }, // gray
-  { hex: "#000000", rmIndex: 0, rgb: [0, 0, 0] }, // black (pens)
+// Push: a Zotero colour (matched by nearest rgb) -> reMarkable PenColor index.
+const PUSH: { rgb: [number, number, number]; rmIndex: number }[] = [
+  { rgb: [255, 212, 0], rmIndex: RM.YELLOW }, // yellow
+  { rgb: [95, 178, 54], rmIndex: RM.GREEN }, // green
+  { rgb: [46, 168, 229], rmIndex: RM.BLUE }, // blue
+  { rgb: [162, 138, 229], rmIndex: RM.BLUE }, // purple -> blue
+  { rgb: [241, 152, 55], rmIndex: RM.ORANGE }, // orange
+  { rgb: [170, 170, 170], rmIndex: RM.GRAY }, // gray
+  { rgb: [255, 102, 102], rmIndex: RM.PINK }, // red -> pink
+  { rgb: [229, 110, 238], rmIndex: RM.PINK }, // magenta -> pink
 ];
 
-/**
- * Alpha (0-255) for highlights pushed to the device. Lower = more transparent
- * on the reMarkable (compensates for e-ink contrast / keeps text readable).
- * Tune here.
- */
-export const PUSH_HIGHLIGHT_ALPHA = 110;
+// Pull: reMarkable PenColor index -> Zotero hex.
+const PULL: Record<number, string> = {
+  [RM.YELLOW]: "#ffd400",
+  [RM.YELLOW_2]: "#ffd400",
+  [RM.GREEN]: "#5fb236",
+  [RM.GREEN_2]: "#5fb236",
+  [RM.BLUE]: "#2ea8e5",
+  [RM.CYAN]: "#2ea8e5",
+  [RM.PINK]: "#e56eee", // pink -> magenta
+  [RM.MAGENTA]: "#e56eee",
+  [RM.RED]: "#ff6666",
+  [RM.ORANGE]: "#f19837",
+  [RM.GRAY]: "#aaaaaa",
+  [RM.GRAY_OVERLAP]: "#aaaaaa",
+  [RM.BLACK]: "#000000",
+  [RM.WHITE]: "#ffffff",
+};
 
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
@@ -41,37 +62,41 @@ export function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-function nearestByRgb(rgb: [number, number, number]): ColorEntry {
-  let best = COLORS[0];
-  let bestDist = Infinity;
-  for (const c of COLORS) {
-    const d =
-      (rgb[0] - c.rgb[0]) ** 2 +
-      (rgb[1] - c.rgb[1]) ** 2 +
-      (rgb[2] - c.rgb[2]) ** 2;
-    if (d < bestDist) {
-      bestDist = d;
-      best = c;
-    }
-  }
-  return best;
+function dist(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
 }
 
-/** Zotero hex -> reMarkable PenColor index + rgba (for push). */
-export function zoteroToRm(
-  hex: string,
-  kind: "highlight" | "ink",
-): { index: number; rgba: [number, number, number, number] } {
-  const entry = nearestByRgb(hexToRgb(hex));
-  const alpha = kind === "highlight" ? PUSH_HIGHLIGHT_ALPHA : 255;
-  return { index: entry.rmIndex, rgba: [...entry.rgb, alpha] };
+/** Zotero hex -> reMarkable PenColor index (push). */
+export function zoteroToRm(hex: string): number {
+  const rgb = hexToRgb(hex);
+  let best = PUSH[0];
+  for (const c of PUSH) if (dist(rgb, c.rgb) < dist(rgb, best.rgb)) best = c;
+  return best.rmIndex;
 }
 
-/** reMarkable PenColor index (+ optional rgba) -> Zotero hex (for pull). */
+/** reMarkable PenColor index (+ optional rgba) -> Zotero hex (pull). */
 export function rmToZoteroHex(
   colorIndex: number,
   rgba?: [number, number, number, number],
 ): string {
-  if (rgba) return nearestByRgb([rgba[0], rgba[1], rgba[2]]).hex;
-  return COLORS.find((c) => c.rmIndex === colorIndex)?.hex ?? "#ffd400";
+  if (colorIndex in PULL) return PULL[colorIndex];
+  // Unknown index (e.g. a colour we haven't mapped): match by rgba if present.
+  if (rgba) {
+    const rgb: [number, number, number] = [rgba[0], rgba[1], rgba[2]];
+    let bestHex = "#ffd400";
+    let bestDist = Infinity;
+    for (const c of PUSH) {
+      const d = dist(rgb, c.rgb);
+      if (d < bestDist) {
+        bestDist = d;
+        bestHex =
+          "#" + c.rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+      }
+    }
+    return bestHex;
+  }
+  return "#ffd400";
 }
