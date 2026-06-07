@@ -33,8 +33,10 @@ export interface RmStroke {
   colorIndex: number;
   /** explicit colour when present (highlighters), [r,g,b,a] 0-255 */
   rgba?: [number, number, number, number];
-  /** thickness scale from the stroke */
+  /** thickness scale from the stroke (a pen-setting multiplier) */
   thickness: number;
+  /** representative per-point pen width (reMarkable units; see geometry.inkWidth) */
+  pointWidth: number;
   isHighlighter: boolean;
   points: RmPoint[];
 }
@@ -243,13 +245,27 @@ function parseLine(r: Reader, version: number): RmStroke {
   const pointsEnd = r.subblock(5);
   const pointSize = version === 1 ? 0x18 : 0x0e;
   const points: RmPoint[] = [];
+  const widths: number[] = [];
   while (r.position + pointSize <= pointsEnd) {
     const x = r.f32();
     const y = r.f32();
-    r.position += pointSize - 8; // skip speed/width/direction/pressure
+    let w: number;
+    if (version === 1) {
+      r.f32(); // speed
+      r.f32(); // direction
+      w = Math.round(r.f32() * 4); // width (v1 stores width/4 as float)
+      r.f32(); // pressure
+    } else {
+      r.u16(); // speed
+      w = r.u16(); // width
+      r.u8(); // direction
+      r.u8(); // pressure
+    }
     points.push({ x, y });
+    widths.push(w);
   }
   r.position = pointsEnd;
+  const pointWidth = median(widths);
 
   // Optional trailing fields. color_rgba (index 8) is what we want.
   let rgba: [number, number, number, number] | undefined;
@@ -266,9 +282,17 @@ function parseLine(r: Reader, version: number): RmStroke {
     colorIndex,
     rgba,
     thickness,
+    pointWidth,
     isHighlighter: HIGHLIGHTER_TOOLS.has(tool),
     points,
   };
+}
+
+function median(xs: number[]): number {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 function parseGlyph(r: Reader): RmHighlight {

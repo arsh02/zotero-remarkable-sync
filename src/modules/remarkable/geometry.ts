@@ -26,6 +26,15 @@ export interface PdfPageSize {
 export const RM_DPI = 226;
 const PT_PER_RM = 72 / RM_DPI;
 
+// Per-point pen width (reMarkable units) -> PDF points. Derived from a real
+// export: highlighter point-width 120 -> 11.34pt, fineliner 16 -> 1.51pt.
+const RM_WIDTH_FACTOR = 0.0945;
+
+/** Convert a reMarkable pen width to a Zotero ink width in PDF points. */
+export function inkWidth(rmPointWidth: number): number {
+  return Math.max(0.5, Math.round(rmPointWidth * RM_WIDTH_FACTOR * 100) / 100);
+}
+
 /** Map a reMarkable (x, y) to a PDF point [x, y] with origin bottom-left. */
 export function rmToPdf(
   x: number,

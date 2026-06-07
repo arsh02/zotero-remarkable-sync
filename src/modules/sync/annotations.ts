@@ -5,6 +5,7 @@
 import {
   rectToZotero,
   strokeToPath,
+  inkWidth,
   type PdfPageSize,
 } from "../remarkable/geometry";
 import type { RmDocPage } from "../remarkable/rmdoc";
@@ -133,7 +134,7 @@ async function createInk(
     position: {
       pageIndex,
       paths: [path],
-      width: Math.max(1, Math.round(stroke.thickness)),
+      width: inkWidth(stroke.pointWidth),
     },
     comment: "",
   });
