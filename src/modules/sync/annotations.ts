@@ -53,15 +53,34 @@ function sortIndex(pageIndex: number, yFromTop: number): string {
   ].join("|");
 }
 
+// Zotero object-key charset (excludes 0/1/I/O).
+const KEY_CHARS = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
+
+function generateKey(): string {
+  const gen = (Zotero as any).DataObjectUtilities?.generateKey;
+  if (typeof gen === "function") return gen();
+  let k = "";
+  for (let i = 0; i < 8; i++) {
+    k += KEY_CHARS[Math.floor(Math.random() * KEY_CHARS.length)];
+  }
+  return k;
+}
+
 async function saveAnnotation(
   attachment: Zotero.Item,
   json: Record<string, unknown>,
 ): Promise<string | null> {
+  const key = generateKey();
   try {
-    const item = await Zotero.Annotations.saveFromJSON(attachment, json as any);
-    return item?.key ?? null;
+    await Zotero.Annotations.saveFromJSON(attachment, { key, ...json } as any);
+    return key;
   } catch (e) {
-    log("saveAnnotation failed:", errMsg(e));
+    log(
+      `saveAnnotation(${json.type}) failed:`,
+      errMsg(e),
+      "| json:",
+      JSON.stringify(json).slice(0, 200),
+    );
     return null;
   }
 }

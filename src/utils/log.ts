@@ -36,9 +36,20 @@ function safeStringify(value: unknown): string {
 
 /** Normalise any thrown value into a readable string. */
 export function errMsg(e: unknown): string {
-  if (e instanceof Error) return e.message || e.name;
   if (e === undefined) return "undefined error (no message)";
   if (e === null) return "null error";
   if (typeof e === "string") return e;
+  // Errors thrown from Zotero's realm fail `instanceof Error` here, and their
+  // message/stack are non-enumerable (so JSON.stringify gives "{}"). Read the
+  // common properties defensively.
+  const a = e as any;
+  if (typeof a.message === "string" && a.message) return a.message;
+  if (typeof a.name === "string" && a.name) return a.name;
+  try {
+    const s = a.toString?.();
+    if (s && s !== "[object Object]") return s;
+  } catch {
+    /* ignore */
+  }
   return safeStringify(e);
 }
