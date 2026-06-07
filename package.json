@@ -28,6 +28,7 @@
     "release": "zotero-plugin release",
     "test": "zotero-plugin test",
     "test:parser": "esbuild src/modules/remarkable/rmlines.ts --bundle --format=esm --outfile=.scaffold/rmlines.mjs --log-level=error && node test/rmlines.verify.mjs",
+    "test:writer": "esbuild src/modules/remarkable/rmlines.ts --bundle --format=esm --outfile=.scaffold/rmlines.mjs --log-level=error && esbuild src/modules/remarkable/rmwrite.ts --bundle --format=esm --outfile=.scaffold/rmwrite.mjs --log-level=error && node test/rmwrite.verify.mjs",
     "update-deps": "npm update --save",
     "prepare": "husky"
   },
