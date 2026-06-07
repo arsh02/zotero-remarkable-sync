@@ -17,6 +17,7 @@ import { parseRmPage } from "../remarkable/rmlines";
 import type { RmStroke, RmHighlight } from "../remarkable/rmlines";
 import { encodeAppend } from "../remarkable/rmwrite";
 import { updateDocumentPages } from "../remarkable/rmupload";
+import { zoteroToRm } from "../remarkable/colors";
 import {
   readPdfPageSizes,
   pageSizeAt,
@@ -38,41 +39,6 @@ export interface PushSummary {
   errors: string[];
 }
 
-// reMarkable PenColor index -> rgb, for nearest-colour mapping.
-const PALETTE: [number, [number, number, number]][] = [
-  [0, [0, 0, 0]],
-  [1, [170, 170, 170]],
-  [3, [255, 212, 0]],
-  [4, [95, 178, 54]],
-  [5, [255, 102, 102]],
-  [6, [46, 168, 229]],
-  [7, [255, 80, 80]],
-  [12, [229, 110, 238]],
-];
-
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.slice(0, 2), 16) || 0,
-    parseInt(h.slice(2, 4), 16) || 0,
-    parseInt(h.slice(4, 6), 16) || 0,
-  ];
-}
-
-function nearestColorIndex(hex: string): number {
-  const [r, g, b] = hexToRgb(hex);
-  let best = 0;
-  let bestDist = Infinity;
-  for (const [idx, [cr, cg, cb]] of PALETTE) {
-    const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
-    if (d < bestDist) {
-      bestDist = d;
-      best = idx;
-    }
-  }
-  return best;
-}
-
 /** Convert one Zotero annotation to reMarkable strokes/highlights. */
 function annotationToRm(
   item: Zotero.Item,
@@ -92,22 +58,23 @@ function annotationToRm(
       zoteroRectToRm(r as [number, number, number, number], size),
     );
     if (rects.length) {
-      const [r, g, b] = hexToRgb(color);
+      const { index, rgba } = zoteroToRm(color, "highlight");
       out.highlights.push({
         text: item.annotationText || "",
-        colorIndex: nearestColorIndex(color),
-        rgba: [r, g, b, 255],
+        colorIndex: index,
+        rgba,
         rects,
       });
     }
   } else if (type === "ink") {
     const width = pdfWidthToRm(pos.width ?? 1);
+    const { index } = zoteroToRm(color, "ink");
     for (const path of pos.paths ?? []) {
       const points = zoteroPathToRm(path, size);
       if (points.length) {
         out.strokes.push({
           tool: 17, // fineliner
-          colorIndex: nearestColorIndex(color),
+          colorIndex: index,
           thickness: 2,
           pointWidth: width,
           isHighlighter: false,

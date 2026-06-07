@@ -6,6 +6,7 @@ import { getPref } from "../utils/prefs";
 import { log, errMsg } from "../utils/log";
 import * as client from "./remarkable/client";
 import * as engine from "./sync/engine";
+import { pushAnnotations } from "./sync/push";
 
 const Cc = Components.classes as any;
 const Ci = Components.interfaces as any;
@@ -20,6 +21,7 @@ async function tick(): Promise<void> {
   try {
     log("scheduler: auto-sync tick");
     await engine.pushAll();
+    await pushAnnotations();
     await engine.pullAll();
   } catch (e) {
     log("scheduler: tick error:", errMsg(e));

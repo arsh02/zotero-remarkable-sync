@@ -16,24 +16,8 @@ import {
 } from "../remarkable/geometry";
 import type { RmDocPage } from "../remarkable/rmdoc";
 import type { RmHighlight, RmStroke } from "../remarkable/rmlines";
+import { rmToZoteroHex } from "../remarkable/colors";
 import { log, errMsg } from "../../utils/log";
-
-// reMarkable PenColor index -> hex, used when no explicit rgba is present.
-const PEN_HEX: Record<number, string> = {
-  0: "#000000", // black
-  1: "#aaaaaa", // gray
-  2: "#ffffff", // white
-  3: "#ffd400", // yellow
-  4: "#5fb236", // green
-  5: "#ff6666", // pink
-  6: "#2ea8e5", // blue
-  7: "#ff6666", // red
-  9: "#ffd400", // highlight (real colour in rgba)
-  10: "#5fb236",
-  11: "#2ea8e5",
-  12: "#e56eee",
-  13: "#ffd400",
-};
 
 // Zotero object-key charset (excludes 0/1/I/O).
 const KEY_CHARS = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
@@ -52,16 +36,7 @@ function colorToHex(
   colorIndex: number,
   rgba?: [number, number, number, number],
 ): string {
-  if (rgba) {
-    return (
-      "#" +
-      rgba
-        .slice(0, 3)
-        .map((c) => c.toString(16).padStart(2, "0"))
-        .join("")
-    );
-  }
-  return PEN_HEX[colorIndex] ?? "#ffd400";
+  return rmToZoteroHex(colorIndex, rgba);
 }
 
 function sortIndex(pageIndex: number, yFromTop: number): string {
