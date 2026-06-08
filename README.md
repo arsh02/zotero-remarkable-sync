@@ -1,5 +1,12 @@
 # Zotero reMarkable Sync
 
+> [!WARNING]
+> **This is an experimental add-on.** It reads and writes the undocumented `.rm`
+> v6 format and mutates documents in your reMarkable cloud account. Bugs can
+> reorder, corrupt, or delete annotations and files. **Back up your reMarkable
+> data and your Zotero library before using it, and treat every sync as
+> potentially destructive.** Use at your own risk.
+
 A [Zotero 7](https://www.zotero.org/) plugin that keeps your PDFs **and annotations**
 in sync with a [reMarkable](https://remarkable.com/) tablet.
 
@@ -59,7 +66,8 @@ strokes become ink.
 - **M1** — push tagged PDFs, auth, preferences, context-menu UX ✅
 - **M2** — pull annotations back as native Zotero annotations ✅
 - **M3** — scheduled auto-sync ✅ · further polish ongoing
-- **Future** — Zotero → reMarkable annotation push (write `.rm` v6)
+- **M4** — Zotero → reMarkable annotation push (write `.rm` v6), bidirectional
+  deletion, per-item overwrite, status indicator ✅
 
 ## Credits
 
