@@ -4,7 +4,7 @@ import {
   registerPrefsScripts,
 } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
-import { log } from "./utils/log";
+import { log, errMsg } from "./utils/log";
 import * as ui from "./modules/ui";
 import * as scheduler from "./modules/scheduler";
 import * as engine from "./modules/sync/engine";
@@ -43,6 +43,20 @@ async function onStartup() {
     ["item"],
     addon.data.config.addonRef,
   );
+
+  // Surface otherwise-silent "Uncaught (in promise)" rejections so we can see
+  // their reason (and whether they originate here at all).
+  try {
+    Zotero.getMainWindow()?.addEventListener("unhandledrejection", (e: any) => {
+      try {
+        log("unhandledrejection:", errMsg(e?.reason) || String(e?.reason));
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* ignore */
+  }
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
