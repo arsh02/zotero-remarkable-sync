@@ -1,22 +1,24 @@
-// A "reMarkable" status column in the items list: a coloured dot showing whether
-// each item is synced recently, synced a while ago, or tagged-but-not-yet-synced.
+// reMarkable status indicator shown *before the item title* (not a separate
+// column). A small coloured dot: synced recently / synced a while ago / tagged
+// but not yet synced. Implemented by defensively wrapping the item tree's
+// internal `_renderCell` — every addition is in try/catch so it can never break
+// the list, and we guard against double-patching across hot-reloads.
 
-import { config } from "../../package.json";
 import { getRecordCached } from "./sync/state";
 import { getSyncTag } from "./sync/engine";
 import { log } from "../utils/log";
 
-const FRESH_MS = 24 * 60 * 60 * 1000; // "just synced" window
+const FRESH_MS = 24 * 60 * 60 * 1000; // "synced recently" window
 
 type SyncState = "fresh" | "stale" | "never" | "";
 
 const DOT: Record<Exclude<SyncState, "">, [string, string, string]> = {
-  fresh: ["●", "#3fae4a", "Synced to reMarkable recently"],
-  stale: ["●", "#c9a227", "Synced to reMarkable a while ago"],
-  never: ["○", "#9b9b9b", "Tagged for reMarkable — not synced yet"],
+  fresh: ["●", "#3fae4a", "reMarkable: synced recently"],
+  stale: ["●", "#c9a227", "reMarkable: synced a while ago"],
+  never: ["○", "#9b9b9b", "reMarkable: tagged, not synced yet"],
 };
 
-let columnKey: string | null = null;
+let patch: { disable: () => void } | null = null;
 
 function stateOf(item: Zotero.Item): SyncState {
   if (!item?.isRegularItem?.()) return "";
@@ -34,36 +36,56 @@ function stateOf(item: Zotero.Item): SyncState {
   return item.hasTag(getSyncTag()) ? "never" : "";
 }
 
-export async function registerColumn(): Promise<void> {
+export function registerColumn(): void {
   try {
-    const key = await Zotero.ItemTreeManager.registerColumn({
-      dataKey: "remarkable",
-      label: "reMarkable",
-      pluginID: config.addonID,
-      width: "70",
-      dataProvider: (item) => stateOf(item),
-      renderCell: (_index, data, column, _isFirst, doc) => {
-        const cell = doc.createElement("span");
-        cell.className = `cell ${column.className}`;
-        cell.style.textAlign = "center";
-        const dot = DOT[data as Exclude<SyncState, "">];
-        if (dot) {
-          cell.textContent = dot[0];
-          cell.style.color = dot[1];
-          cell.setAttribute("title", dot[2]);
-        }
-        return cell;
-      },
+    const proto = (Zotero as any).ItemTree?.prototype;
+    if (!proto || typeof proto._renderCell !== "function") {
+      log("title indicator: ItemTree._renderCell not found");
+      return;
+    }
+    if (proto.__rmsTitleDot) return; // already patched (e.g. after hot-reload)
+    proto.__rmsTitleDot = true;
+
+    patch = new ztoolkit.Patch();
+    (patch as any).setData({
+      target: proto,
+      funcSign: "_renderCell",
+      enabled: true,
+      patcher: (origin: any) =>
+        function (this: any, index: number, ...rest: any[]) {
+          const cell = origin.call(this, index, ...rest);
+          try {
+            const isFirstColumn = rest[2];
+            if (!isFirstColumn || !cell?.ownerDocument) return cell;
+            const item = this.getRow?.(index)?.ref as Zotero.Item;
+            const st = stateOf(item);
+            if (st) {
+              const [glyph, color, title] = DOT[st];
+              const dot = cell.ownerDocument.createElement("span");
+              dot.textContent = `${glyph} `;
+              dot.style.color = color;
+              dot.style.flex = "none";
+              dot.setAttribute("title", title);
+              cell.insertBefore(dot, cell.firstChild);
+            }
+          } catch {
+            // never break the item tree
+          }
+          return cell;
+        },
     });
-    columnKey = key || null;
   } catch (e) {
-    log("registerColumn failed:", e);
+    log("title indicator failed:", e);
   }
 }
 
 export function unregisterColumn(): void {
-  if (columnKey) {
-    Zotero.ItemTreeManager.unregisterColumn(columnKey);
-    columnKey = null;
+  try {
+    patch?.disable();
+    const proto = (Zotero as any).ItemTree?.prototype;
+    if (proto) delete proto.__rmsTitleDot;
+  } catch {
+    /* ignore */
   }
+  patch = null;
 }

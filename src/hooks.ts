@@ -30,8 +30,8 @@ async function onStartup() {
   // registered once — not per window).
   await registerPrefPane();
   ui.registerSection();
-  await preloadState(); // so the status column can read sync state synchronously
-  await column.registerColumn();
+  await preloadState(); // so the status indicator can read sync state synchronously
+  column.registerColumn();
   scheduler.start();
 
   // Watch for items being trashed/deleted so we can remove them from the device.
