@@ -7,8 +7,8 @@
 > data and your Zotero library before using it, and treat every sync as
 > potentially destructive.** Use at your own risk.
 
-A [Zotero 7](https://www.zotero.org/) plugin that keeps your PDFs **and annotations**
-in sync with a [reMarkable](https://remarkable.com/) tablet.
+A [Zotero 7](https://www.zotero.org/) plugin (supports up to Zotero 9) that keeps your
+PDFs **and annotations** in sync with a [reMarkable](https://remarkable.com/) tablet.
 
 - **Tag-driven** — items tagged `@remarkable` (configurable) are pushed to the device.
 - **Bidirectional** — PDFs go up; highlights and ink strokes made on the device come
