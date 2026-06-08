@@ -13,6 +13,7 @@ declare namespace _ZoteroTypes {
       "syncMode": string;
       "syncInterval": number;
       "deleteOnUnsync": boolean;
+      "safeMode": boolean;
     };
   }
 }

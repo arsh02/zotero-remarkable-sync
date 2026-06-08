@@ -12,7 +12,7 @@ import * as column from "./modules/column";
 import { preload as preloadState } from "./modules/sync/state";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M4-dirty-dot-refresh";
+const BUILD = "v0.2.0-safe-mode";
 
 let notifierID: string | null = null;
 

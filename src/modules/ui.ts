@@ -106,6 +106,7 @@ export async function runSyncNow(): Promise<void> {
           sent: sent.pushed,
           added: pull.annotations,
           removed: pull.removed,
+          stopped: push.stopped,
         },
       }),
     });
@@ -160,12 +161,7 @@ export async function runForcePull(): Promise<void> {
 
 /** Push Zotero-origin annotations to the reMarkable device. */
 export async function runPush(): Promise<void> {
-  if (!client.isConnected()) {
-    new ztoolkit.ProgressWindow(config.addonName)
-      .createLine({ text: getString("status-not-connected"), type: "fail" })
-      .show(4000);
-    return;
-  }
+  if (notConnected() || blockedBySafeMode()) return;
   const pw = new ztoolkit.ProgressWindow(config.addonName, {
     closeOnClick: true,
     closeTime: -1,
@@ -228,6 +224,15 @@ function notConnected(): boolean {
   return true;
 }
 
+/** Block device-mutating annotation pushes while safe mode is on (with notice). */
+function blockedBySafeMode(): boolean {
+  if (!engine.isSafeMode()) return false;
+  new ztoolkit.ProgressWindow(config.addonName)
+    .createLine({ text: getString("safe-mode-blocked"), type: "fail" })
+    .show(5000);
+  return true;
+}
+
 function newProgress() {
   return new ztoolkit.ProgressWindow(config.addonName, {
     closeOnClick: true,
@@ -241,7 +246,7 @@ function newProgress() {
 export async function runOverwriteFromZotero(
   items: Zotero.Item[],
 ): Promise<void> {
-  if (notConnected()) return;
+  if (notConnected() || blockedBySafeMode()) return;
   const atts = engine.pdfAttachmentsOf(items);
   if (atts.length === 0) {
     new ztoolkit.ProgressWindow(config.addonName)

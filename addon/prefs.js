@@ -12,3 +12,6 @@ pref("syncMode", "manual");
 pref("syncInterval", 30);
 // When removing an item from sync, also delete it from the reMarkable cloud.
 pref("deleteOnUnsync", true);
+// Safe mode: never modify annotations on the reMarkable (pull only). PDFs are
+// still uploaded ("storing" is non-destructive). On by default.
+pref("safeMode", true);

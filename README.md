@@ -6,6 +6,11 @@
 > reorder, corrupt, or delete annotations and files. **Back up your reMarkable
 > data and your Zotero library before using it, and treat every sync as
 > potentially destructive.** Use at your own risk.
+>
+> To limit the risk, **Safe mode is on by default**: the plugin only _pulls_
+> annotations from the reMarkable into Zotero and uploads PDFs — it never
+> modifies annotations already on the device. Turn it off in the plugin
+> preferences to push Zotero annotations back to the device (the riskier path).
 
 A [Zotero 7](https://www.zotero.org/) plugin (supports up to Zotero 9) that keeps your
 PDFs **and annotations** in sync with a [reMarkable](https://remarkable.com/) tablet.

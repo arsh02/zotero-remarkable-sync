@@ -10,6 +10,9 @@ pref-connection-status-error = Connection failed: { $error }
 pref-sync-title = Sync
 pref-sync-tag = Sync tag
 pref-sync-folder = reMarkable folder
+pref-sync-safe-mode =
+    .label = Safe mode (recommended)
+pref-sync-safe-mode-help = Never modifies annotations on the reMarkable — pulls them into Zotero only. PDFs are still uploaded. Turn off to push Zotero annotations to the device.
 pref-sync-delete-on-unsync =
     .label = Delete from reMarkable when removed from sync
 

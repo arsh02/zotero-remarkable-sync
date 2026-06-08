@@ -31,7 +31,7 @@ import {
 } from "../remarkable/geometry";
 import { allRecords, setRecord, type PushedItem } from "./state";
 import { existingSig } from "./annotations";
-import type { ProgressFn } from "./engine";
+import { isSafeMode as engineIsSafeMode, type ProgressFn } from "./engine";
 
 const IO = globalThis as any;
 const PUSHABLE = new Set(["highlight", "underline", "ink"]);
@@ -128,6 +128,13 @@ export async function pushAnnotations(
 ): Promise<PushSummary> {
   ensureNetworkGlobals();
   const summary: PushSummary = { pushed: 0, skipped: 0, failed: 0, errors: [] };
+
+  // Safe mode never rewrites `.rm` pages on the device. This is the single guard
+  // that guarantees no annotation push can happen while it is on.
+  if (engineIsSafeMode()) {
+    log("pushAnnotations: skipped (safe mode on)");
+    return summary;
+  }
 
   const records = await allRecords();
   const keys = Object.keys(records).filter(

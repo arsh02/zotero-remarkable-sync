@@ -17,7 +17,11 @@ status-not-connected = Not connected to reMarkable. Connect in the plugin prefer
 sync-now = Sync now
 sync-running = Syncing…
 sync-done = Pushed { $pushed }, skipped { $skipped }, failed { $failed }
-sync-complete = { $files } up · { $sent } sent · +{ $added } −{ $removed }
+sync-complete = { $files } up · { $sent } sent · +{ $added } −{ $removed }{ $stopped ->
+    [0] {""}
+   *[other] { " · " }{ $stopped } unsynced (deleted on device)
+}
+safe-mode-blocked = Safe mode is on — turn it off in preferences to push annotations to the device.
 pull-done = Pulled +{ $added } −{ $removed }
 clear-done = Removed { $count } pulled annotation(s)
 push-done = Pushed { $pushed } annotation(s) to device, skipped { $skipped }

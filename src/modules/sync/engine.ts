@@ -21,6 +21,7 @@ const IO = globalThis as any;
 export interface SyncSummary {
   pushed: number;
   skipped: number;
+  stopped: number; // items unsynced because they were deleted on the device
   failed: number;
   errors: string[];
 }
@@ -34,6 +35,38 @@ export function getSyncTag(): string {
 
 export function isItemSynced(item: Zotero.Item): boolean {
   return item.hasTag(getSyncTag());
+}
+
+/**
+ * Safe mode (default on): never modify annotations on the device — pull only.
+ * PDFs are still uploaded, since storing a document is non-destructive.
+ */
+export function isSafeMode(): boolean {
+  return getPref("safeMode") !== false;
+}
+
+/**
+ * Stop syncing an attachment: drop its sync record and remove the sync tag from
+ * its parent item (so it is excluded from future syncs). Touches only Zotero —
+ * never the device. Used when a document was deleted on the reMarkable.
+ */
+async function stopSync(att: Zotero.Item): Promise<void> {
+  await removeRecord(att.key);
+  const parent = att.parentItem;
+  const tag = getSyncTag();
+  if (parent && parent.hasTag(tag)) {
+    // Only drop the tag if no *other* PDF of this item is still synced.
+    const others = Zotero.Items.get(parent.getAttachments()).filter(
+      (a) => a.isPDFAttachment() && a.key !== att.key,
+    );
+    const anyOther = (
+      await Promise.all(others.map((a) => getRecord(a.key)))
+    ).some(Boolean);
+    if (!anyOther) {
+      parent.removeTag(tag);
+      await parent.saveTx();
+    }
+  }
 }
 
 /** Find tagged regular items in one library. */
@@ -94,6 +127,7 @@ export async function pushAll(
   const summary: SyncSummary = {
     pushed: 0,
     skipped: 0,
+    stopped: 0,
     failed: 0,
     errors: [],
   };
@@ -120,8 +154,8 @@ export async function pushAll(
   const folderId = await client.ensureFolder(api, folder);
   log(`pushAll: folderId="${folderId}"`);
 
-  // The device documents that currently exist — so we can re-upload (restore)
-  // any that were deleted on the reMarkable. Zotero is the source of truth.
+  // The device documents that currently exist — so we can detect docs deleted on
+  // the reMarkable and stop syncing them (rather than re-uploading).
   const deviceDocIds = new Set((await api.listItems()).map((e) => e.id));
 
   let done = 0;
@@ -153,13 +187,23 @@ export async function pushAll(
         done++;
         continue;
       }
+      // Deleted on the reMarkable: respect that and stop syncing it in Zotero,
+      // rather than re-uploading. An explicit forced push (per-item "Overwrite
+      // device from Zotero") still re-uploads a fresh copy.
+      if (missingOnDevice && !opts.force) {
+        log(`pushAll: "${name}" was deleted on reMarkable — stopping sync`);
+        await stopSync(att);
+        summary.stopped++;
+        done++;
+        continue;
+      }
       if (missingOnDevice) {
-        log(`pushAll: "${name}" was removed from device — restoring`);
+        log(`pushAll: "${name}" missing on device — re-uploading (forced)`);
       }
 
       log(`pushAll: uploading "${name}" (${bytes.length} bytes) …`);
       const entry = await client.uploadPdf(api, name, bytes, folderId);
-      // When restoring a deleted document, reset annotation tracking so every
+      // When re-uploading a fresh document, reset annotation tracking so every
       // Zotero annotation gets re-pushed onto the fresh document.
       const record: SyncRecord = {
         docId: entry.id,
