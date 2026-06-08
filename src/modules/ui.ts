@@ -78,10 +78,24 @@ export async function runSyncNow(): Promise<void> {
   try {
     const report = (text: string, pct: number) =>
       pw.changeLine({ progress: pct, text });
-    const push = await engine.pushAll(report);
-    const sent = await pushAnnotations(report);
-    log("runSyncNow: push done, starting pull");
-    const pull = await engine.pullAll(report);
+    const runOnce = async () => {
+      const push = await engine.pushAll(report);
+      const sent = await pushAnnotations(report);
+      log("runSyncNow: push done, starting pull");
+      const pull = await engine.pullAll(report);
+      return { push, sent, pull };
+    };
+    let push, sent, pull;
+    try {
+      ({ push, sent, pull } = await runOnce());
+    } catch (e) {
+      // A stalled/aborted request usually means a stale session token. Drop the
+      // cached session, re-authenticate, and try the whole run once more.
+      log("runSyncNow: first attempt failed, refreshing session:", errMsg(e));
+      report(getString("sync-running"), 0);
+      client.resetApi();
+      ({ push, sent, pull } = await runOnce());
+    }
     pw.changeLine({
       progress: 100,
       text: getString("sync-complete", {

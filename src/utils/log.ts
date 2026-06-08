@@ -17,10 +17,10 @@ export function log(...args: unknown[]): void {
       )
       .join(" ");
     const line = `${PREFIX} ${text}`;
-    // Debug log (serve terminal / Help -> Debug Output Logging).
+    // Debug log (serve terminal / Help -> Debug Output Logging). We deliberately
+    // do NOT touch `window.console` — on Zotero 9 first access lazy-loads
+    // Console.sys.mjs via the removed `ChromeUtils.import`, spamming warnings.
     Zotero.debug(line);
-    // Also the Browser Console, so it shows up alongside other errors.
-    (Zotero.getMainWindow() as any)?.console?.log(line);
   } catch {
     // never let logging throw
   }
