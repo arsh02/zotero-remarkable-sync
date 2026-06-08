@@ -70,6 +70,16 @@ export async function getRecord(key: string): Promise<SyncRecord | undefined> {
   return (await load())[key];
 }
 
+/** Load the state into memory (so getRecordCached works). */
+export async function preload(): Promise<void> {
+  await load();
+}
+
+/** Synchronous record lookup from the in-memory cache (undefined if unloaded). */
+export function getRecordCached(key: string): SyncRecord | undefined {
+  return cache?.[key];
+}
+
 export async function setRecord(
   key: string,
   record: SyncRecord,

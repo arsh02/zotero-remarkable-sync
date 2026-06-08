@@ -8,6 +8,8 @@ import { log } from "./utils/log";
 import * as ui from "./modules/ui";
 import * as scheduler from "./modules/scheduler";
 import * as engine from "./modules/sync/engine";
+import * as column from "./modules/column";
+import { preload as preloadState } from "./modules/sync/state";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
 const BUILD = "M4-annotation-deletion";
@@ -28,6 +30,8 @@ async function onStartup() {
   // registered once — not per window).
   await registerPrefPane();
   ui.registerSection();
+  await preloadState(); // so the status column can read sync state synchronously
+  await column.registerColumn();
   scheduler.start();
 
   // Watch for items being trashed/deleted so we can remove them from the device.
@@ -69,6 +73,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 function onShutdown(): void {
   scheduler.stop();
+  column.unregisterColumn();
   if (notifierID) {
     Zotero.Notifier.unregisterObserver(notifierID);
     notifierID = null;
