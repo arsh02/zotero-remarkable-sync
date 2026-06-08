@@ -35,6 +35,18 @@ const PUSH: { rgb: [number, number, number]; rmIndex: number }[] = [
   { rgb: [229, 110, 238], rmIndex: RM.PINK }, // magenta -> pink
 ];
 
+// reMarkable highlighter *display* colours (rgb) -> Zotero hex, for matching
+// highlights stored as colorIndex 9 (HIGHLIGHT) with an explicit rgba. These are
+// approximate; refine from real "pull HL ... rgba=" logs.
+const RM_DISPLAY: { rgb: [number, number, number]; hex: string }[] = [
+  { rgb: [255, 237, 117], hex: "#ffd400" }, // yellow
+  { rgb: [172, 255, 133], hex: "#5fb236" }, // green
+  { rgb: [190, 234, 254], hex: "#2ea8e5" }, // blue
+  { rgb: [255, 195, 140], hex: "#f19837" }, // orange
+  { rgb: [242, 158, 255], hex: "#e56eee" }, // pink -> magenta
+  { rgb: [199, 199, 198], hex: "#aaaaaa" }, // gray
+];
+
 // Pull: reMarkable PenColor index -> Zotero hex.
 const PULL: Record<number, string> = {
   [RM.YELLOW]: "#ffd400",
@@ -82,21 +94,21 @@ export function rmToZoteroHex(
   colorIndex: number,
   rgba?: [number, number, number, number],
 ): string {
-  if (colorIndex in PULL) return PULL[colorIndex];
-  // Unknown index (e.g. a colour we haven't mapped): match by rgba if present.
-  if (rgba) {
+  // When an explicit rgba is present (newer firmware stores highlight colours as
+  // index 9 + rgba), it is authoritative — match it to a reMarkable display
+  // colour. Otherwise fall back to the PenColor index.
+  if (rgba && (rgba[0] || rgba[1] || rgba[2])) {
     const rgb: [number, number, number] = [rgba[0], rgba[1], rgba[2]];
-    let bestHex = "#ffd400";
+    let best = RM_DISPLAY[0];
     let bestDist = Infinity;
-    for (const c of PUSH) {
+    for (const c of RM_DISPLAY) {
       const d = dist(rgb, c.rgb);
       if (d < bestDist) {
         bestDist = d;
-        bestHex =
-          "#" + c.rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+        best = c;
       }
     }
-    return bestHex;
+    return best.hex;
   }
-  return "#ffd400";
+  return PULL[colorIndex] ?? "#ffd400";
 }
