@@ -124,12 +124,15 @@ async function loadTemplate(
 /** Push Zotero-origin annotations for every synced attachment. */
 export async function pushAnnotations(
   progress?: ProgressFn,
+  opts: { onlyKeys?: Set<string> } = {},
 ): Promise<PushSummary> {
   ensureNetworkGlobals();
   const summary: PushSummary = { pushed: 0, skipped: 0, failed: 0, errors: [] };
 
   const records = await allRecords();
-  const keys = Object.keys(records);
+  const keys = Object.keys(records).filter(
+    (k) => !opts.onlyKeys || opts.onlyKeys.has(k),
+  );
   if (keys.length === 0) return summary;
 
   const api = await client.getApi();

@@ -12,7 +12,7 @@ import * as column from "./modules/column";
 import { preload as preloadState } from "./modules/sync/state";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M4-fetch-timeout";
+const BUILD = "M4-overwrite-toggle-dot";
 
 let notifierID: string | null = null;
 
@@ -31,7 +31,6 @@ async function onStartup() {
   await registerPrefPane();
   ui.registerSection();
   await preloadState(); // so the status indicator can read sync state synchronously
-  column.registerColumn();
   scheduler.start();
 
   // Watch for items being trashed/deleted so we can remove them from the device.
@@ -77,6 +76,9 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 
   // Register this window's UI: toolbar button, Tools menu, context menu.
   ui.registerWindowUI(win);
+  // Attach the status dot to this window's item tree (prototype is shared, so
+  // this is idempotent across windows).
+  column.registerColumn(win);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {

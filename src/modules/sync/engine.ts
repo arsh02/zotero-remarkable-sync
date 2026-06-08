@@ -57,7 +57,7 @@ export async function findSyncItems(): Promise<Zotero.Item[]> {
 }
 
 /** Collect the PDF attachments of the given regular items. */
-function pdfAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
+export function pdfAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   const out: Zotero.Item[] = [];
   for (const item of items) {
     const attIDs = item.getAttachments();
@@ -86,7 +86,10 @@ function displayNameFor(att: Zotero.Item): string {
  * Push every tagged item's PDF attachment to the configured reMarkable folder.
  * Unchanged files (matching the recorded sha-256) are skipped.
  */
-export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
+export async function pushAll(
+  progress?: ProgressFn,
+  opts: { attachments?: Zotero.Item[]; force?: boolean } = {},
+): Promise<SyncSummary> {
   ensureNetworkGlobals();
   const summary: SyncSummary = {
     pushed: 0,
@@ -96,8 +99,10 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
   };
 
   log("pushAll: start");
-  const items = await findSyncItems();
-  const attachments = pdfAttachmentsOf(items);
+  // When given an explicit attachment list (per-item "Overwrite from Zotero"),
+  // push exactly those; otherwise push every tagged item's PDF.
+  const attachments =
+    opts.attachments ?? pdfAttachmentsOf(await findSyncItems());
   log(`pushAll: ${attachments.length} PDF attachment(s) tagged`);
   if (attachments.length === 0) {
     progress?.("Nothing tagged to sync", 100);
@@ -137,7 +142,12 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
 
       const existing = await getRecord(att.key);
       const missingOnDevice = !!existing && !deviceDocIds.has(existing.docId);
-      if (existing && existing.fileHash === fileHash && !missingOnDevice) {
+      if (
+        !opts.force &&
+        existing &&
+        existing.fileHash === fileHash &&
+        !missingOnDevice
+      ) {
         log(`pushAll: skip "${name}" (unchanged)`);
         summary.skipped++;
         done++;
@@ -196,7 +206,7 @@ export interface PullSummary {
  */
 export async function pullAll(
   progress?: ProgressFn,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; onlyKeys?: Set<string> } = {},
 ): Promise<PullSummary> {
   ensureNetworkGlobals();
   const summary: PullSummary = {
@@ -208,7 +218,9 @@ export async function pullAll(
   };
 
   const records = await allRecords();
-  const keys = Object.keys(records);
+  const keys = Object.keys(records).filter(
+    (k) => !opts.onlyKeys || opts.onlyKeys.has(k),
+  );
   log(`pullAll: start (${keys.length} synced record(s))`);
   if (keys.length === 0) return summary;
 
@@ -316,6 +328,24 @@ export async function clearPulledAnnotations(): Promise<number> {
   }
   log(`clearPulledAnnotations: removed ${removed}`);
   return removed;
+}
+
+/**
+ * Clear the pull guard (and deletion suppressions) for the given attachments so
+ * a forced pull re-applies every annotation currently on the device. Used by the
+ * per-item "Overwrite from reMarkable" action. Does not touch annotations
+ * directly — applyAnnotations mirrors the device state on the next pull.
+ */
+export async function resetPullState(attKeys: string[]): Promise<void> {
+  for (const attKey of attKeys) {
+    const rec = await getRecord(attKey);
+    if (!rec) continue;
+    await setRecord(attKey, {
+      ...rec,
+      lastPulledVersion: undefined,
+      deletedSigs: [],
+    });
+  }
 }
 
 /**

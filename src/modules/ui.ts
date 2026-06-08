@@ -14,6 +14,8 @@ import * as client from "./remarkable/client";
 // 96px icon (manifest/install). For in-app UI we use a small 32px variant so
 // it isn't rendered oversized in the toolbar / item-pane sidenav.
 const ICON = `chrome://${config.addonRef}/content/icons/icon-small.png`;
+// Toggle-membership button shares the reMarkable mark (tooltip differentiates).
+const TOGGLE_ICON = ICON;
 const ID = `${config.addonRef}`;
 const SECTION_ID = `${config.addonRef}-status`;
 
@@ -22,6 +24,7 @@ const SECTION_ID = `${config.addonRef}-status`;
 // previously injected DOM nodes survive).
 const ELEMENT_IDS = [
   `${ID}-tb-syncnow`,
+  `${ID}-tb-toggle`,
   `${ID}-style`,
   `${ID}-tools-syncnow`,
   `${ID}-tools-push`,
@@ -30,6 +33,8 @@ const ELEMENT_IDS = [
   `${ID}-sep`,
   `${ID}-add`,
   `${ID}-remove`,
+  `${ID}-ovr-zotero`,
+  `${ID}-ovr-remarkable`,
 ];
 // Property key under which we stash the popupshowing listener on the item menu
 // element, so a stale one can be removed even after a hot-reload.
@@ -218,6 +223,139 @@ export async function runClearPulled(): Promise<void> {
   }
 }
 
+function notConnected(): boolean {
+  if (client.isConnected()) return false;
+  new ztoolkit.ProgressWindow(config.addonName)
+    .createLine({ text: getString("status-not-connected"), type: "fail" })
+    .show(4000);
+  return true;
+}
+
+function newProgress() {
+  return new ztoolkit.ProgressWindow(config.addonName, {
+    closeOnClick: true,
+    closeTime: -1,
+  })
+    .createLine({ text: getString("sync-running"), progress: 0 })
+    .show();
+}
+
+/** Force-push the selected items' PDFs + annotations to the device (Zotero wins). */
+export async function runOverwriteFromZotero(
+  items: Zotero.Item[],
+): Promise<void> {
+  if (notConnected()) return;
+  const atts = engine.pdfAttachmentsOf(items);
+  if (atts.length === 0) {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: getString("nothing-selected"), type: "fail" })
+      .show(3000);
+    return;
+  }
+  const onlyKeys = new Set(atts.map((a) => a.key));
+  const pw = newProgress();
+  try {
+    const report = (text: string, pct: number) =>
+      pw.changeLine({ progress: pct, text });
+    await engine.pushAll(report, { attachments: atts, force: true });
+    const ann = await pushAnnotations(report, { onlyKeys });
+    pw.changeLine({
+      progress: 100,
+      text: getString("overwrite-zotero-done", { args: { sent: ann.pushed } }),
+    });
+    pw.startCloseTimer(5000);
+  } catch (e) {
+    log("runOverwriteFromZotero error:", e);
+    pw.changeLine({
+      type: "fail",
+      progress: 100,
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
+    });
+    pw.startCloseTimer(8000);
+  }
+}
+
+/** Force-pull the selected items' annotations from the device (device wins). */
+export async function runOverwriteFromRemarkable(
+  items: Zotero.Item[],
+): Promise<void> {
+  if (notConnected()) return;
+  const atts = engine.pdfAttachmentsOf(items);
+  if (atts.length === 0) {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: getString("nothing-selected"), type: "fail" })
+      .show(3000);
+    return;
+  }
+  const onlyKeys = new Set(atts.map((a) => a.key));
+  const pw = newProgress();
+  try {
+    const report = (text: string, pct: number) =>
+      pw.changeLine({ progress: pct, text });
+    await engine.resetPullState([...onlyKeys]);
+    const pull = await engine.pullAll(report, { force: true, onlyKeys });
+    pw.changeLine({
+      progress: 100,
+      text: getString("overwrite-remarkable-done", {
+        args: { added: pull.annotations, removed: pull.removed },
+      }),
+    });
+    pw.startCloseTimer(5000);
+  } catch (e) {
+    log("runOverwriteFromRemarkable error:", e);
+    pw.changeLine({
+      type: "fail",
+      progress: 100,
+      text: getString("sync-error", { args: { error: errMsg(e) } }),
+    });
+    pw.startCloseTimer(8000);
+  }
+}
+
+/** Toggle the selected items in/out of reMarkable sync (add the tag, or remove). */
+export async function runToggleSync(items: Zotero.Item[]): Promise<void> {
+  const regs = items.filter((i) => i.isRegularItem());
+  if (regs.length === 0) {
+    new ztoolkit.ProgressWindow(config.addonName)
+      .createLine({ text: getString("nothing-selected"), type: "fail" })
+      .show(3000);
+    return;
+  }
+  try {
+    const allSynced = regs.every((i) => engine.isItemSynced(i));
+    if (allSynced) {
+      await engine.removeFromSync(regs);
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString("toggle-removed", { args: { count: regs.length } }),
+        })
+        .show(3000);
+    } else {
+      const unsynced = regs.filter((i) => !engine.isItemSynced(i));
+      await engine.addToSync(unsynced);
+      new ztoolkit.ProgressWindow(config.addonName)
+        .createLine({
+          text: getString("toggle-added", { args: { count: unsynced.length } }),
+        })
+        .show(3000);
+    }
+    refreshStatusDots();
+  } catch (e) {
+    log("runToggleSync error:", e);
+  }
+}
+
+/** Repaint item-tree status dots after a membership change. */
+function refreshStatusDots(): void {
+  for (const win of Zotero.getMainWindows()) {
+    try {
+      (win as any)?.ZoteroPane?.itemsView?.tree?.invalidate?.();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-window UI (toolbar button, Tools menu, context menu)
 // ---------------------------------------------------------------------------
@@ -246,7 +384,7 @@ function registerToolbarButton(win: Window): void {
     "style",
   ) as HTMLStyleElement;
   style.id = `${ID}-style`;
-  style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon { width: 16px; height: 16px; }`;
+  style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon, #${ID}-tb-toggle .toolbarbutton-icon { width: 16px; height: 16px; }`;
   doc.documentElement?.appendChild(style);
 
   const btn = (doc as any).createXULElement("toolbarbutton") as Element;
@@ -256,6 +394,18 @@ function registerToolbarButton(win: Window): void {
   btn.setAttribute("image", ICON);
   btn.addEventListener("command", () => void runSyncNow());
   toolbar.appendChild(btn);
+
+  // Toggle the selected item(s) in/out of sync.
+  const toggle = (doc as any).createXULElement("toolbarbutton") as Element;
+  toggle.id = `${ID}-tb-toggle`;
+  toggle.setAttribute("class", "zotero-tb-button");
+  toggle.setAttribute("tooltiptext", getString("toolbar-toggle-tooltip"));
+  toggle.setAttribute("image", TOGGLE_ICON);
+  toggle.addEventListener(
+    "command",
+    () => void runToggleSync(selectedRegularItems(win)),
+  );
+  toolbar.appendChild(toggle);
 }
 
 function registerToolsMenu(win: Window): void {
@@ -310,6 +460,7 @@ function registerContextMenu(win: Window): void {
     () => {
       engine
         .addToSync(selectedRegularItems(win))
+        .then(() => refreshStatusDots())
         .catch((e) => log("addToSync error:", e));
     },
   );
@@ -320,11 +471,26 @@ function registerContextMenu(win: Window): void {
     () => {
       engine
         .removeFromSync(selectedRegularItems(win))
+        .then(() => refreshStatusDots())
         .catch((e) => log("removeFromSync error:", e));
     },
   );
+  const ovrZotero = makeMenuitem(
+    doc,
+    "ovr-zotero",
+    getString("menuitem-overwrite-from-zotero"),
+    () => void runOverwriteFromZotero(selectedRegularItems(win)),
+  );
+  const ovrRemarkable = makeMenuitem(
+    doc,
+    "ovr-remarkable",
+    getString("menuitem-overwrite-from-remarkable"),
+    () => void runOverwriteFromRemarkable(selectedRegularItems(win)),
+  );
 
-  [sep, addItem, removeItem].forEach((n) => itemmenu.appendChild(n));
+  [sep, addItem, removeItem, ovrZotero, ovrRemarkable].forEach((n) =>
+    itemmenu.appendChild(n),
+  );
 
   const onShowing = () => {
     const items = selectedRegularItems(win);
@@ -332,6 +498,9 @@ function registerContextMenu(win: Window): void {
     const anySynced = items.some((i) => engine.isItemSynced(i));
     (addItem as any).hidden = !anyUnsynced;
     (removeItem as any).hidden = !anySynced;
+    // Overwrite actions only make sense for already-synced items.
+    (ovrZotero as any).hidden = !anySynced;
+    (ovrRemarkable as any).hidden = !anySynced;
     (sep as any).hidden = items.length === 0;
   };
   itemmenu.addEventListener("popupshowing", onShowing);
