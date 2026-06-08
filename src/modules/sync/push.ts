@@ -15,7 +15,7 @@ import { mapPdfPages, type PageRef } from "../remarkable/rmdoc";
 import { parseRmPage } from "../remarkable/rmlines";
 import type { RmStroke, RmHighlight, CrdtId } from "../remarkable/rmlines";
 import {
-  encodeAppend,
+  encodePageUpdate,
   splitStructure,
   blankStructure,
 } from "../remarkable/rmwrite";
@@ -149,16 +149,20 @@ export async function pushAnnotations(
       }
 
       const pulled = new Set(rec.annotationKeys ?? []);
-      const pushedBefore = new Set(rec.pushedKeys ?? []);
-      const candidates = (att as Zotero.Item)
-        .getAnnotations()
-        .filter(
-          (a) =>
-            PUSHABLE.has(a.annotationType) &&
-            !pulled.has(a.key) &&
-            !pushedBefore.has(a.key),
-        );
-      if (candidates.length === 0) {
+      const tracked = rec.pushedItems ?? [];
+      const pushedBefore = new Set(tracked.map((p) => p.key));
+
+      const annotations = (att as Zotero.Item).getAnnotations();
+      const currentKeys = new Set(annotations.map((a) => a.key));
+      const additions = annotations.filter(
+        (a) =>
+          PUSHABLE.has(a.annotationType) &&
+          !pulled.has(a.key) &&
+          !pushedBefore.has(a.key),
+      );
+      // Previously pushed annotations now gone from Zotero -> delete on device.
+      const deletions = tracked.filter((p) => !currentKeys.has(p.key));
+      if (additions.length === 0 && deletions.length === 0) {
         done++;
         continue;
       }
@@ -170,88 +174,159 @@ export async function pushAnnotations(
         : new Uint8Array();
       const sizes = readPdfPageSizes(pdfBytes);
       const pageMap = await mapPdfPages(api, rec.docId, entry.hash);
+      const findRef = (pageUuid: string) => {
+        for (const [pi, r] of pageMap)
+          if (r.pageUuid === pageUuid) return { pdfIdx: pi, ref: r };
+        return null;
+      };
 
-      // Group candidates by PDF page.
-      const byPage = new Map<number, Zotero.Item[]>();
-      for (const a of candidates) {
+      // Build a per-page plan of additions + deletions.
+      interface Plan {
+        pdfIdx: number;
+        ref: PageRef;
+        adds: Zotero.Item[];
+        deleteIds: CrdtId[];
+      }
+      const plan = new Map<string, Plan>();
+      for (const a of additions) {
         let pi = 0;
         try {
           pi = JSON.parse(a.annotationPosition).pageIndex ?? 0;
         } catch {
           continue;
         }
-        (byPage.get(pi) ?? byPage.set(pi, []).get(pi)!).push(a);
-      }
-
-      // To create page files for pages the device has never annotated, clone an
-      // existing page's structure, or generate a blank one if the document has
-      // no annotated page at all.
-      const template = (await loadTemplate(api, pageMap)) ?? blankStructure();
-
-      const pageRm = new Map<string, Uint8Array>();
-      const pushedNow: string[] = [];
-      for (const [pdfIdx, annots] of byPage) {
-        const ref = pageMap.get(pdfIdx);
+        const ref = pageMap.get(pi);
         if (!ref) {
-          summary.skipped += annots.length;
+          summary.skipped++;
           continue;
         }
-        const size = pageSizeAt(sizes, pdfIdx);
+        const p =
+          plan.get(ref.pageUuid) ??
+          plan
+            .set(ref.pageUuid, { pdfIdx: pi, ref, adds: [], deleteIds: [] })
+            .get(ref.pageUuid)!;
+        p.adds.push(a);
+      }
+      for (const d of deletions) {
+        const found = findRef(d.page);
+        if (!found?.ref.rmEntry) continue; // page gone — deletion moot
+        const p =
+          plan.get(d.page) ??
+          plan
+            .set(d.page, {
+              pdfIdx: found.pdfIdx,
+              ref: found.ref,
+              adds: [],
+              deleteIds: [],
+            })
+            .get(d.page)!;
+        for (const [p1, p2] of d.ids)
+          p.deleteIds.push({ part1: p1, part2: p2 });
+      }
+
+      let template: Template | null | undefined;
+      const pageRm = new Map<string, Uint8Array>();
+      // Keep tracking for annotations still present; rebuild for re-pushed pages.
+      const newTracked = tracked.filter((p) => currentKeys.has(p.key));
+      let addedCount = 0;
+
+      for (const [pageUuid, work] of plan) {
+        const size = pageSizeAt(sizes, work.pdfIdx);
         const strokes: RmStroke[] = [];
         const highlights: RmHighlight[] = [];
-        for (const a of annots) {
+        const hlOwners: string[] = [];
+        const stOwners: string[] = [];
+        for (const a of work.adds) {
           const c = annotationToRm(a, size);
-          strokes.push(...c.strokes);
-          highlights.push(...c.highlights);
+          for (const h of c.highlights) {
+            highlights.push(h);
+            hlOwners.push(a.key);
+          }
+          for (const s of c.strokes) {
+            strokes.push(s);
+            stOwners.push(a.key);
+          }
         }
 
-        let newBytes: Uint8Array;
-        if (ref.rmEntry) {
-          // Append to the page's own existing .rm (reuse its layer + author).
+        let base: Uint8Array;
+        let meta: {
+          layerId: CrdtId;
+          lastItemId?: CrdtId;
+          author: number;
+          startCounter: number;
+          deleteIds: CrdtId[];
+        };
+        if (work.ref.rmEntry) {
           const existing = await api.raw.getHash(
-            ref.rmEntry.id,
-            ref.rmEntry.hash,
+            work.ref.rmEntry.id,
+            work.ref.rmEntry.hash,
           );
           const parsed = parseRmPage(existing);
           if (!parsed.layerId) {
-            summary.skipped += annots.length;
+            summary.skipped += work.adds.length;
             continue;
           }
-          const author =
-            parsed.lastItemId?.part1 ??
-            parsed.layerId?.part1 ??
-            parsed.maxAuthor;
-          newBytes = encodeAppend(existing, strokes, highlights, {
+          base = existing;
+          meta = {
             layerId: parsed.layerId,
             lastItemId: parsed.lastItemId,
-            author,
+            author:
+              parsed.lastItemId?.part1 ??
+              parsed.layerId.part1 ??
+              parsed.maxAuthor,
             startCounter: parsed.maxCounter + 1,
-          });
-        } else if (template) {
-          // Page has no .rm yet — clone a template page's structure.
-          newBytes = encodeAppend(template.structure, strokes, highlights, {
+            deleteIds: work.deleteIds,
+          };
+        } else {
+          if (template === undefined) {
+            template = (await loadTemplate(api, pageMap)) ?? blankStructure();
+          }
+          if (!template) {
+            summary.skipped += work.adds.length;
+            continue;
+          }
+          base = template.structure;
+          meta = {
             layerId: template.layerId,
             author: template.author,
             startCounter: template.startCounter,
-          });
-        } else {
-          log(`push: page ${pdfIdx + 1} has no .rm and no template — skipped`);
-          summary.skipped += annots.length;
-          continue;
+            deleteIds: work.deleteIds,
+          };
         }
 
-        for (const a of annots) pushedNow.push(a.key);
-        pageRm.set(ref.pageUuid, newBytes);
+        const { bytes, ids } = encodePageUpdate(
+          base,
+          strokes,
+          highlights,
+          meta,
+        );
+        pageRm.set(pageUuid, bytes);
+
+        // Map assigned ids (highlights then strokes) back to annotation keys.
+        const owners = [...hlOwners, ...stOwners];
+        const byKey = new Map<string, [number, number][]>();
+        ids.forEach((id, i) => {
+          const k = owners[i];
+          if (!k) return;
+          (byKey.get(k) ?? byKey.set(k, []).get(k)!).push([id.part1, id.part2]);
+        });
+        for (const [k, kids] of byKey) {
+          newTracked.push({ key: k, page: pageUuid, ids: kids });
+          addedCount++;
+        }
       }
 
       if (pageRm.size > 0) {
-        log(`push: "${rec.visibleName}" -> ${pageRm.size} page(s)`);
+        log(
+          `push: "${rec.visibleName}" -> ${pageRm.size} page(s) (+${addedCount} -${deletions.length})`,
+        );
         await updateDocumentPages(api, rec.docId, pageRm);
         await setRecord(attKey, {
           ...rec,
-          pushedKeys: [...(rec.pushedKeys ?? []), ...pushedNow],
+          pushedItems: newTracked,
+          pushedKeys: newTracked.map((p) => p.key),
         });
-        summary.pushed += pushedNow.length;
+        summary.pushed += addedCount;
       }
     } catch (e) {
       log(`push: FAILED "${rec.visibleName}": ${errMsg(e)}`);

@@ -297,11 +297,13 @@ function writeChain(
   layerNode: CrdtId,
   ids: IdGen,
   start: CrdtId,
-): void {
+): CrdtId[] {
+  const assigned: CrdtId[] = [];
   let left = start;
   for (const hl of highlights) {
     const item = ids.next();
     writeGlyphItem(w, hl, { parent: layerNode, item, left, right: END_MARKER });
+    assigned.push(item);
     left = item;
   }
   for (const stroke of strokes) {
@@ -312,8 +314,29 @@ function writeChain(
       left,
       right: END_MARKER,
     });
+    assigned.push(item);
     left = item;
   }
+  return assigned;
+}
+
+/**
+ * Write a SceneTombstoneItemBlock (0x08) marking an existing item deleted. The
+ * device merges by item_id, so re-stating the id with deleted_length > 0 removes
+ * the stroke/highlight we previously added.
+ */
+export function writeTombstone(
+  w: Writer,
+  itemId: CrdtId,
+  parent: CrdtId,
+): void {
+  w.block(0x08, 1, 1, (b) => {
+    b.id(1, parent);
+    b.id(2, itemId);
+    b.id(3, END_MARKER);
+    b.id(4, END_MARKER);
+    b.int(5, 1); // deleted_length > 0
+  });
 }
 
 /**
@@ -428,37 +451,52 @@ export function blankStructure(author = 1): RmStructure {
   };
 }
 
+export interface PageUpdateMeta {
+  layerId: CrdtId;
+  lastItemId?: CrdtId;
+  /** an author id already registered in the page (reuse, don't invent) */
+  author: number;
+  /** first counter to use — must be above every existing part2 */
+  startCounter: number;
+  /** ids of previously-added items to delete (tombstone) */
+  deleteIds?: CrdtId[];
+}
+
 /**
- * Append new item blocks (no header) onto an existing real `.rm` page, reusing
- * its layer and chaining after its last item. Keeps the page's device-valid
- * structure intact while adding our annotations.
+ * Append item blocks (no header) onto an existing real `.rm` page: tombstones
+ * for `deleteIds`, then new items for `strokes`/`highlights`. Returns the new
+ * bytes and the ids assigned to the added items (in highlight-then-stroke
+ * order), so the caller can track them for later deletion.
  */
-export function encodeAppend(
+export function encodePageUpdate(
   existing: Uint8Array,
   strokes: RmStroke[],
   highlights: RmHighlight[],
-  meta: {
-    layerId: CrdtId;
-    lastItemId?: CrdtId;
-    /** an author id already registered in the page (reuse, don't invent) */
-    author: number;
-    /** first counter to use — must be above every existing part2 */
-    startCounter: number;
-  },
-): Uint8Array {
+  meta: PageUpdateMeta,
+): { bytes: Uint8Array; ids: CrdtId[] } {
   const w = new Writer();
-  const ids = new IdGen(meta.author, meta.startCounter);
-  writeChain(
+  for (const id of meta.deleteIds ?? []) writeTombstone(w, id, meta.layerId);
+  const ids = writeChain(
     w,
     strokes,
     highlights,
     meta.layerId,
-    ids,
+    new IdGen(meta.author, meta.startCounter),
     meta.lastItemId ?? END_MARKER,
   );
   const items = w.result();
   const out = new Uint8Array(existing.length + items.length);
   out.set(existing, 0);
   out.set(items, existing.length);
-  return out;
+  return { bytes: out, ids };
+}
+
+/** Back-compat: append only, returning just the bytes. */
+export function encodeAppend(
+  existing: Uint8Array,
+  strokes: RmStroke[],
+  highlights: RmHighlight[],
+  meta: Omit<PageUpdateMeta, "deleteIds">,
+): Uint8Array {
+  return encodePageUpdate(existing, strokes, highlights, meta).bytes;
 }

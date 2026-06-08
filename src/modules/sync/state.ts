@@ -21,6 +21,18 @@ export interface SyncRecord {
   annotationKeys?: string[];
   /** keys of Zotero annotations already pushed to the device (avoid re-push) */
   pushedKeys?: string[];
+  /** Zotero annotations pushed to the device + the reMarkable item ids assigned,
+   *  so we can tombstone them on the device when deleted in Zotero */
+  pushedItems?: PushedItem[];
+}
+
+export interface PushedItem {
+  /** Zotero annotation key */
+  key: string;
+  /** reMarkable page uuid the items were written to */
+  page: string;
+  /** assigned reMarkable item ids ([part1, part2] each) */
+  ids: [number, number][];
 }
 
 type StateMap = Record<string, SyncRecord>;

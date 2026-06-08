@@ -10,7 +10,7 @@ import * as scheduler from "./modules/scheduler";
 import * as engine from "./modules/sync/engine";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M4-deletion-sync";
+const BUILD = "M4-annotation-deletion";
 
 let notifierID: string | null = null;
 

@@ -163,6 +163,7 @@ export async function pushAll(progress?: ProgressFn): Promise<SyncSummary> {
           : existing?.lastPulledVersion,
         annotationKeys: missingOnDevice ? [] : existing?.annotationKeys,
         pushedKeys: missingOnDevice ? [] : existing?.pushedKeys,
+        pushedItems: missingOnDevice ? [] : existing?.pushedItems,
       };
       await setRecord(att.key, record);
       log(`pushAll: uploaded "${name}" -> ${entry.id}`);
@@ -308,6 +309,7 @@ export async function clearPulledAnnotations(): Promise<number> {
       ...rec,
       annotationKeys: [],
       pushedKeys: [],
+      pushedItems: [],
       lastPulledVersion: undefined,
     });
   }
