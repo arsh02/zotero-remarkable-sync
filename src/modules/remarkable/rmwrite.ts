@@ -491,6 +491,90 @@ export function encodePageUpdate(
   return { bytes: out, ids };
 }
 
+function readVaruintAt(bytes: Uint8Array, pos: number): [number, number] {
+  let shift = 0;
+  let result = 0;
+  let p = pos;
+  for (;;) {
+    const b = bytes[p++];
+    result |= (b & 0x7f) << shift;
+    shift += 7;
+    if (!(b & 0x80)) break;
+  }
+  return [result >>> 0, p - pos];
+}
+
+/** Read item_id (the 2nd tagged CrdtId) from a scene-item block's content. */
+function readItemId(bytes: Uint8Array, start: number): CrdtId | null {
+  let p = start;
+  let [tag, n] = readVaruintAt(bytes, p);
+  p += n;
+  if ((tag & 0xf) !== TAG_ID || tag >> 4 !== 1) return null; // parent id(1)
+  p += 1; // parent part1
+  [, n] = readVaruintAt(bytes, p);
+  p += n; // parent part2
+  [tag, n] = readVaruintAt(bytes, p);
+  p += n;
+  if ((tag & 0xf) !== TAG_ID || tag >> 4 !== 2) return null; // item id(2)
+  const part1 = bytes[p];
+  p += 1;
+  const [part2] = readVaruintAt(bytes, p);
+  return { part1, part2 };
+}
+
+/**
+ * Rewrite a page: drop the scene items whose item_id is in `removeIds` (our
+ * previously-written items), keep everything else verbatim (structure + device
+ * items), then append the given current items. This is how deletions take
+ * effect — a removed annotation is simply absent from the rewritten page.
+ */
+export function rebuildPage(
+  existing: Uint8Array,
+  strokes: RmStroke[],
+  highlights: RmHighlight[],
+  removeIds: Set<string>,
+  meta: Omit<PageUpdateMeta, "deleteIds">,
+): { bytes: Uint8Array; ids: CrdtId[] } {
+  const HEADER_LEN = 43;
+  const dv = new DataView(
+    existing.buffer,
+    existing.byteOffset,
+    existing.byteLength,
+  );
+  const kept: number[] = [];
+  for (let i = 0; i < HEADER_LEN; i++) kept.push(existing[i]);
+
+  let pos = HEADER_LEN;
+  while (pos + 8 <= existing.length) {
+    const blockLen = dv.getUint32(pos, true);
+    const type = existing[pos + 7];
+    const blockEnd = pos + 8 + blockLen;
+    if (blockEnd > existing.length) break;
+    let drop = false;
+    if (type === 0x03 || type === 0x05 || type === 0x08) {
+      const id = readItemId(existing, pos + 8);
+      if (id && removeIds.has(`${id.part1},${id.part2}`)) drop = true;
+    }
+    if (!drop) for (let i = pos; i < blockEnd; i++) kept.push(existing[i]);
+    pos = blockEnd;
+  }
+
+  const w = new Writer();
+  const ids = writeChain(
+    w,
+    strokes,
+    highlights,
+    meta.layerId,
+    new IdGen(meta.author, meta.startCounter),
+    meta.lastItemId ?? END_MARKER,
+  );
+  const items = w.result();
+  const out = new Uint8Array(kept.length + items.length);
+  out.set(kept, 0);
+  out.set(items, kept.length);
+  return { bytes: out, ids };
+}
+
 /** Back-compat: append only, returning just the bytes. */
 export function encodeAppend(
   existing: Uint8Array,

@@ -12,7 +12,7 @@ import * as column from "./modules/column";
 import { preload as preloadState } from "./modules/sync/state";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M4-annotation-deletion";
+const BUILD = "M4-page-rewrite-delete";
 
 let notifierID: string | null = null;
 

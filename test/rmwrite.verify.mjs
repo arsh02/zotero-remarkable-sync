@@ -11,8 +11,26 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { parseRmPage } = await import(join(root, ".scaffold/rmlines.mjs"));
-const { writeItems, encodeAppend, splitStructure, blankStructure } =
-  await import(join(root, ".scaffold/rmwrite.mjs"));
+const {
+  writeItems,
+  encodeAppend,
+  encodePageUpdate,
+  rebuildPage,
+  splitStructure,
+  blankStructure,
+} = await import(join(root, ".scaffold/rmwrite.mjs"));
+
+const mkStroke = (x) => ({
+  tool: 17,
+  colorIndex: 0,
+  thickness: 2,
+  pointWidth: 16,
+  isHighlighter: false,
+  points: [
+    { x, y: x },
+    { x: x + 1, y: x + 1 },
+  ],
+});
 
 const approx = (a, b, eps = 1e-3) =>
   assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -251,6 +269,37 @@ for (const name of [
   assert.equal(page.layerId.part2, 11);
 }
 
+// --- rebuildPage: remove an item by id ---
+{
+  const blank = blankStructure();
+  const meta = {
+    layerId: blank.layerId,
+    author: blank.author,
+    startCounter: blank.startCounter,
+  };
+  const { bytes: withTwo, ids } = encodePageUpdate(
+    blank.structure,
+    [mkStroke(1), mkStroke(5)],
+    [],
+    meta,
+  );
+  assert.equal(parseRmPage(withTwo).strokes.length, 2);
+  // Remove the first stroke by id; add nothing.
+  const removeIds = new Set([`${ids[0].part1},${ids[0].part2}`]);
+  const { bytes: withOne } = rebuildPage(withTwo, [], [], removeIds, {
+    ...meta,
+    startCounter: blank.startCounter + 10,
+  });
+  assert.equal(parseRmPage(withOne).strokes.length, 1, "one stroke removed");
+  // Remove both.
+  const removeBoth = new Set(ids.map((i) => `${i.part1},${i.part2}`));
+  const { bytes: none } = rebuildPage(withTwo, [], [], removeBoth, {
+    ...meta,
+    startCounter: blank.startCounter + 10,
+  });
+  assert.equal(parseRmPage(none).strokes.length, 0, "both strokes removed");
+}
+
 console.log(
-  "✓ rmwrite round-trips (synthetic + fixtures + append + clone + blank page)",
+  "✓ rmwrite round-trips (synthetic + fixtures + append + clone + blank + rebuild)",
 );
