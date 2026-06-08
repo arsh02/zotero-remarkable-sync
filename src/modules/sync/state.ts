@@ -24,6 +24,8 @@ export interface SyncRecord {
   /** Zotero annotations pushed to the device + the reMarkable item ids assigned,
    *  so we can tombstone them on the device when deleted in Zotero */
   pushedItems?: PushedItem[];
+  /** signatures of annotations deleted in Zotero, so pull won't re-create them */
+  deletedSigs?: string[];
 }
 
 export interface PushedItem {
@@ -33,6 +35,8 @@ export interface PushedItem {
   page: string;
   /** assigned reMarkable item ids ([part1, part2] each) */
   ids: [number, number][];
+  /** content signature, to suppress re-pull if deleted */
+  sig?: string;
 }
 
 type StateMap = Record<string, SyncRecord>;

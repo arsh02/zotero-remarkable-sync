@@ -30,6 +30,7 @@ import {
   type PdfPageSize,
 } from "../remarkable/geometry";
 import { allRecords, setRecord } from "./state";
+import { existingSig } from "./annotations";
 import type { ProgressFn } from "./engine";
 
 const IO = globalThis as any;
@@ -310,21 +311,40 @@ export async function pushAnnotations(
           if (!k) return;
           (byKey.get(k) ?? byKey.set(k, []).get(k)!).push([id.part1, id.part2]);
         });
+        const itemByKey = new Map(work.adds.map((a) => [a.key, a]));
         for (const [k, kids] of byKey) {
-          newTracked.push({ key: k, page: pageUuid, ids: kids });
+          const item = itemByKey.get(k);
+          newTracked.push({
+            key: k,
+            page: pageUuid,
+            ids: kids,
+            sig: (item && existingSig(item)) || undefined,
+          });
           addedCount++;
         }
       }
 
-      if (pageRm.size > 0) {
+      // Remember signatures of deleted annotations so pull won't re-create them.
+      const newDeletedSigs = [
+        ...new Set([
+          ...(rec.deletedSigs ?? []),
+          ...deletions.map((d) => d.sig).filter((s): s is string => !!s),
+        ]),
+      ];
+
+      if (
+        pageRm.size > 0 ||
+        newDeletedSigs.length !== (rec.deletedSigs ?? []).length
+      ) {
         log(
           `push: "${rec.visibleName}" -> ${pageRm.size} page(s) (+${addedCount} -${deletions.length})`,
         );
-        await updateDocumentPages(api, rec.docId, pageRm);
+        if (pageRm.size > 0) await updateDocumentPages(api, rec.docId, pageRm);
         await setRecord(attKey, {
           ...rec,
           pushedItems: newTracked,
           pushedKeys: newTracked.map((p) => p.key),
+          deletedSigs: newDeletedSigs,
         });
         summary.pushed += addedCount;
       }

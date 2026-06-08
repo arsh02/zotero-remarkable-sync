@@ -258,6 +258,7 @@ export async function pullAll(
         pages,
         sizes,
         rec.annotationKeys ?? [],
+        rec.deletedSigs ?? [],
       );
 
       const updated: SyncRecord = {

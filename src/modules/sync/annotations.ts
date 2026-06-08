@@ -90,7 +90,7 @@ function sig(
 }
 
 /** Signature of an annotation already saved in Zotero. */
-function existingSig(item: Zotero.Item): string | null {
+export function existingSig(item: Zotero.Item): string | null {
   try {
     const type = item.annotationType;
     const pos = JSON.parse(item.annotationPosition) as {
@@ -262,7 +262,9 @@ export async function applyAnnotations(
   docPages: RmDocPage[],
   sizes: PdfPageSize[],
   ourKeys: string[] = [],
+  deletedSigs: string[] = [],
 ): Promise<ApplyResult> {
+  const suppressed = new Set(deletedSigs);
   // Build the device's current set: pendings to create + their signatures.
   const pendings: Pending[] = [];
   const incoming = new Set<string>();
@@ -311,10 +313,10 @@ export async function applyAnnotations(
     }
   }
 
-  // Add device annotations not already present.
+  // Add device annotations not already present (and not deleted in Zotero).
   const newKeys: string[] = [];
   for (const p of pendings) {
-    if (present.has(p.signature)) continue;
+    if (present.has(p.signature) || suppressed.has(p.signature)) continue;
     const key = await save(attachment, p.json);
     if (key) {
       present.add(p.signature);
