@@ -9,8 +9,6 @@ menuitem-add-to-sync = reMarkable: Add to sync
 menuitem-remove-from-sync = reMarkable: Remove from sync
 menuitem-overwrite-from-zotero = reMarkable: Overwrite device from Zotero
 menuitem-overwrite-from-remarkable = reMarkable: Overwrite Zotero from device
-menuitem-toggle-sync = reMarkable: Toggle sync for selection
-toolbar-toggle-tooltip = reMarkable: Toggle sync for selected items
 
 status-synced = Synced to reMarkable
 status-not-synced = Not synced
@@ -25,7 +23,5 @@ clear-done = Removed { $count } pulled annotation(s)
 push-done = Pushed { $pushed } annotation(s) to device, skipped { $skipped }
 overwrite-zotero-done = Device overwritten from Zotero: { $sent } annotation(s) sent
 overwrite-remarkable-done = Zotero overwritten from device: +{ $added } −{ $removed }
-toggle-added = Added { $count } item(s) to reMarkable sync
-toggle-removed = Removed { $count } item(s) from reMarkable sync
 nothing-selected = No items selected
 sync-error = reMarkable sync error: { $error }

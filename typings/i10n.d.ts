@@ -14,7 +14,6 @@ export type FluentMessageId =
   | 'menuitem-push'
   | 'menuitem-remove-from-sync'
   | 'menuitem-sync-now'
-  | 'menuitem-toggle-sync'
   | 'nothing-selected'
   | 'overwrite-remarkable-done'
   | 'overwrite-zotero-done'
@@ -46,7 +45,4 @@ export type FluentMessageId =
   | 'sync-done'
   | 'sync-error'
   | 'sync-now'
-  | 'sync-running'
-  | 'toggle-added'
-  | 'toggle-removed'
-  | 'toolbar-toggle-tooltip';
+  | 'sync-running';

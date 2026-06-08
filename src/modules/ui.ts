@@ -14,8 +14,6 @@ import * as client from "./remarkable/client";
 // 96px icon (manifest/install). For in-app UI we use a small 32px variant so
 // it isn't rendered oversized in the toolbar / item-pane sidenav.
 const ICON = `chrome://${config.addonRef}/content/icons/icon-small.png`;
-// Toggle-membership button shares the reMarkable mark (tooltip differentiates).
-const TOGGLE_ICON = ICON;
 const ID = `${config.addonRef}`;
 const SECTION_ID = `${config.addonRef}-status`;
 
@@ -24,7 +22,6 @@ const SECTION_ID = `${config.addonRef}-status`;
 // previously injected DOM nodes survive).
 const ELEMENT_IDS = [
   `${ID}-tb-syncnow`,
-  `${ID}-tb-toggle`,
   `${ID}-style`,
   `${ID}-tools-syncnow`,
   `${ID}-tools-push`,
@@ -312,39 +309,6 @@ export async function runOverwriteFromRemarkable(
   }
 }
 
-/** Toggle the selected items in/out of reMarkable sync (add the tag, or remove). */
-export async function runToggleSync(items: Zotero.Item[]): Promise<void> {
-  const regs = items.filter((i) => i.isRegularItem());
-  if (regs.length === 0) {
-    new ztoolkit.ProgressWindow(config.addonName)
-      .createLine({ text: getString("nothing-selected"), type: "fail" })
-      .show(3000);
-    return;
-  }
-  try {
-    const allSynced = regs.every((i) => engine.isItemSynced(i));
-    if (allSynced) {
-      await engine.removeFromSync(regs);
-      new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({
-          text: getString("toggle-removed", { args: { count: regs.length } }),
-        })
-        .show(3000);
-    } else {
-      const unsynced = regs.filter((i) => !engine.isItemSynced(i));
-      await engine.addToSync(unsynced);
-      new ztoolkit.ProgressWindow(config.addonName)
-        .createLine({
-          text: getString("toggle-added", { args: { count: unsynced.length } }),
-        })
-        .show(3000);
-    }
-    refreshStatusDots();
-  } catch (e) {
-    log("runToggleSync error:", e);
-  }
-}
-
 /** Repaint item-tree status dots after a membership change. */
 function refreshStatusDots(): void {
   for (const win of Zotero.getMainWindows()) {
@@ -384,7 +348,7 @@ function registerToolbarButton(win: Window): void {
     "style",
   ) as HTMLStyleElement;
   style.id = `${ID}-style`;
-  style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon, #${ID}-tb-toggle .toolbarbutton-icon { width: 16px; height: 16px; }`;
+  style.textContent = `#${ID}-tb-syncnow .toolbarbutton-icon { width: 16px; height: 16px; }`;
   doc.documentElement?.appendChild(style);
 
   const btn = (doc as any).createXULElement("toolbarbutton") as Element;
@@ -394,18 +358,6 @@ function registerToolbarButton(win: Window): void {
   btn.setAttribute("image", ICON);
   btn.addEventListener("command", () => void runSyncNow());
   toolbar.appendChild(btn);
-
-  // Toggle the selected item(s) in/out of sync.
-  const toggle = (doc as any).createXULElement("toolbarbutton") as Element;
-  toggle.id = `${ID}-tb-toggle`;
-  toggle.setAttribute("class", "zotero-tb-button");
-  toggle.setAttribute("tooltiptext", getString("toolbar-toggle-tooltip"));
-  toggle.setAttribute("image", TOGGLE_ICON);
-  toggle.addEventListener(
-    "command",
-    () => void runToggleSync(selectedRegularItems(win)),
-  );
-  toolbar.appendChild(toggle);
 }
 
 function registerToolsMenu(win: Window): void {
