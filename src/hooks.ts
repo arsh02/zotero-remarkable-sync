@@ -12,7 +12,7 @@ import * as column from "./modules/column";
 import { preload as preloadState } from "./modules/sync/state";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "M4-overwrite-toggle-dot";
+const BUILD = "M4-dirty-dot-refresh";
 
 let notifierID: string | null = null;
 
@@ -113,7 +113,22 @@ async function onNotify(
   ids: Array<string | number>,
   extraData: { [key: string]: any },
 ) {
-  if (type !== "item" || (event !== "trash" && event !== "delete")) return;
+  if (type !== "item") return;
+
+  // Repaint the status dot when annotations are added/edited/removed so a synced
+  // item flips to "changed" without waiting for the next render. On delete/trash
+  // the items are already gone, so we can't introspect them — just repaint.
+  if (event === "add" || event === "modify") {
+    const touchedAnnotation = ids.some((id) => {
+      const it = Zotero.Items.get(Number(id));
+      return it ? (it as any).isAnnotation?.() : false;
+    });
+    if (touchedAnnotation) column.refresh();
+  } else if (event === "delete" || event === "trash") {
+    column.refresh();
+  }
+
+  if (event !== "trash" && event !== "delete") return;
 
   // Collect the keys of affected attachments (records are keyed by attachment).
   const keys = new Set<string>();

@@ -7,6 +7,7 @@
 
 import { getRecordCached } from "./sync/state";
 import { getSyncTag } from "./sync/engine";
+import { existingSig } from "./sync/annotations";
 import { log } from "../utils/log";
 
 const FRESH_MS = 24 * 60 * 60 * 1000; // "synced recently" window
@@ -32,16 +33,33 @@ function stateOf(item: Zotero.Item): SyncState {
     if (!rec) continue;
     hasRecord = true;
     lastPushed = Math.max(lastPushed, rec.lastPushed || 0);
-    const pushed = new Set(rec.pushedKeys ?? []);
+    // Map of already-pushed annotation key -> the signature we pushed, so we can
+    // tell a brand-new annotation from a modified one (same key, moved/retyped).
+    const pushedSig = new Map<string, string | undefined>();
+    for (const p of rec.pushedItems ?? []) pushedSig.set(p.key, p.sig);
     const pulled = new Set(rec.annotationKeys ?? []);
+    const present = new Set<string>();
     for (const a of att.getAnnotations()) {
-      if (
-        PUSHABLE.has(a.annotationType) &&
-        !pulled.has(a.key) &&
-        !pushed.has(a.key)
-      ) {
-        dirty = true;
+      if (!PUSHABLE.has(a.annotationType) || pulled.has(a.key)) continue;
+      present.add(a.key);
+      if (!pushedSig.has(a.key)) {
+        dirty = true; // never pushed
         break;
+      }
+      const was = pushedSig.get(a.key);
+      if (was && existingSig(a) !== was) {
+        dirty = true; // pushed before, but edited since
+        break;
+      }
+    }
+    // A previously-pushed annotation that no longer exists was deleted in Zotero
+    // but still lives on the device until the next push.
+    if (!dirty) {
+      for (const key of pushedSig.keys()) {
+        if (!present.has(key)) {
+          dirty = true;
+          break;
+        }
       }
     }
   }
@@ -100,6 +118,11 @@ function repaint(win: any): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Repaint every open window's item tree (e.g. after annotations change). */
+export function refresh(): void {
+  for (const win of Zotero.getMainWindows()) repaint(win);
 }
 
 /**
