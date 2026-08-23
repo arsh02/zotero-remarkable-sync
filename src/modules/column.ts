@@ -6,7 +6,7 @@
 // live instance. Every addition is in try/catch so it can never break the list.
 
 import { getRecordCached } from "./sync/state";
-import { getSyncTag } from "./sync/engine";
+import { getSyncTag, attachmentKind } from "./sync/engine";
 import { existingSig } from "./sync/annotations";
 import { log } from "../utils/log";
 
@@ -28,11 +28,29 @@ function stateOf(item: Zotero.Item): SyncState {
   let hasRecord = false;
   let dirty = false;
   for (const att of Zotero.Items.get(item.getAttachments())) {
-    if (!att.isPDFAttachment()) continue;
+    const kind = attachmentKind(att);
+    if (!kind || kind === "docx") continue; // docx's record lives on its companion
     const rec = getRecordCached(att.key);
     if (!rec) continue;
     hasRecord = true;
     lastPushed = Math.max(lastPushed, rec.lastPushed || 0);
+
+    if (kind !== "pdf") {
+      // EPUB: simpler "pushed set changed" check (no per-item ids/signatures
+      // to compare, since annotations are baked into re-uploaded content
+      // rather than patched in place — see epubDocs.ts).
+      const pulled = new Set(rec.annotationKeys ?? []);
+      const pushed = new Set(rec.pushedKeys ?? []);
+      for (const a of att.getAnnotations()) {
+        if (!PUSHABLE.has(a.annotationType) || pulled.has(a.key)) continue;
+        if (!pushed.has(a.key)) {
+          dirty = true;
+          break;
+        }
+      }
+      continue;
+    }
+
     // Map of already-pushed annotation key -> the signature we pushed, so we can
     // tell a brand-new annotation from a modified one (same key, moved/retyped).
     const pushedSig = new Map<string, string | undefined>();

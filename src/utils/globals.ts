@@ -50,3 +50,24 @@ export function ensureNetworkGlobals(): void {
   }
   ensured = true;
 }
+
+/**
+ * DOMParser/XMLSerializer are natively global in Zotero 7+'s bootstrap scope
+ * (Firefox 102+), but fall back to the main window's for safety — mirrors the
+ * defensive sourcing above for fetch/crypto.
+ */
+export function getDOMParser(): typeof DOMParser {
+  const g = globalThis as any;
+  if (typeof g.DOMParser !== "undefined") return g.DOMParser;
+  const win = Zotero.getMainWindow() as any;
+  if (win?.DOMParser) return win.DOMParser;
+  throw new Error("reMarkable Sync: no DOMParser available");
+}
+
+export function getXMLSerializer(): typeof XMLSerializer {
+  const g = globalThis as any;
+  if (typeof g.XMLSerializer !== "undefined") return g.XMLSerializer;
+  const win = Zotero.getMainWindow() as any;
+  if (win?.XMLSerializer) return win.XMLSerializer;
+  throw new Error("reMarkable Sync: no XMLSerializer available");
+}

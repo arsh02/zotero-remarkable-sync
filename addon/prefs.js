@@ -15,3 +15,9 @@ pref("deleteOnUnsync", true);
 // Safe mode: never modify annotations on the reMarkable (pull only). PDFs are
 // still uploaded ("storing" is non-destructive). On by default.
 pref("safeMode", true);
+// Auto-generate a companion EPUB (via mammoth) for tagged .docx attachments,
+// so they can be synced too (reMarkable has no native .docx support).
+pref("convertDocx", true);
+// Push tagged standalone/child notes to reMarkable as their own EPUB
+// documents. One-way (Zotero -> device only); notes have no annotation layer.
+pref("syncNotes", true);

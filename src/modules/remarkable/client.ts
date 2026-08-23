@@ -122,6 +122,23 @@ export async function uploadPdf(
   );
 }
 
+/**
+ * Upload an EPUB into a folder, returning the new document's id and hash.
+ * Used for native Zotero EPUB attachments, DOCX-derived companion EPUBs, and
+ * EPUBs generated from Zotero notes.
+ */
+export async function uploadEpub(
+  api: RemarkableApi,
+  visibleName: string,
+  bytes: Uint8Array,
+  folderId: string,
+  tags: string[] = [],
+): Promise<SimpleEntry> {
+  return withGenerationRetry(() =>
+    api.putEpub(visibleName, bytes, { parent: folderId, tags }),
+  );
+}
+
 /** Look up an entry by its document id (uuid). */
 export async function findById(
   api: RemarkableApi,

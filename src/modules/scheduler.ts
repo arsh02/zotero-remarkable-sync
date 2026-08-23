@@ -7,6 +7,8 @@ import { log, errMsg } from "../utils/log";
 import * as client from "./remarkable/client";
 import * as engine from "./sync/engine";
 import { pushAnnotations } from "./sync/push";
+import { pullEpubAll, pushEpubAll } from "./sync/epubDocs";
+import { pushNotes } from "./sync/notes";
 
 const Cc = Components.classes as any;
 const Ci = Components.interfaces as any;
@@ -23,6 +25,11 @@ async function tick(): Promise<void> {
     await engine.pushAll();
     await pushAnnotations();
     await engine.pullAll();
+    // EPUB: pull before push — a push may fully replace the document (see
+    // epubDocs.ts), so pull first to capture any pending device highlights.
+    await pullEpubAll();
+    await pushEpubAll();
+    await pushNotes();
   } catch (e) {
     log("scheduler: tick error:", errMsg(e));
   } finally {

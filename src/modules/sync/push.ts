@@ -137,8 +137,12 @@ export async function pushAnnotations(
   }
 
   const records = await allRecords();
+  // PDF-specific: rewrites `.rm` page geometry. EPUB annotations are pushed by
+  // baking them into the document's own HTML instead — see epubDocs.ts.
   const keys = Object.keys(records).filter(
-    (k) => !opts.onlyKeys || opts.onlyKeys.has(k),
+    (k) =>
+      (records[k].kind ?? "pdf") === "pdf" &&
+      (!opts.onlyKeys || opts.onlyKeys.has(k)),
   );
   if (keys.length === 0) return summary;
 

@@ -2,7 +2,7 @@
   "name": "zotero-remarkable-sync",
   "type": "module",
   "version": "0.2.0",
-  "description": "Sync Zotero PDFs and annotations with the reMarkable tablet",
+  "description": "Sync Zotero PDFs, EPUBs, DOCX, notes and annotations with a reMarkable tablet",
   "config": {
     "addonName": "Zotero reMarkable Sync",
     "addonID": "zotero-remarkable-sync@piwowarski.fr",
@@ -20,6 +20,9 @@
   },
   "homepage": "https://github.com/bpiwowar/zotero-remarkable-sync#readme",
   "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit",
@@ -33,6 +36,8 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.1",
     "rmapi-js": "^10.0.1",
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
   },

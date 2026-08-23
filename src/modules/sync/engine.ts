@@ -1,20 +1,24 @@
-// Orchestrates the Zotero -> reMarkable push and the add/remove-from-sync
-// actions. The pull side (annotations) is added in M2.
+// Orchestrates PDF push/pull and add/remove-from-sync. EPUB/DOCX/notes live
+// in epubDocs.ts, docxCompanion.ts, and notes.ts.
 
 import { getPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
 import { log, errMsg } from "../../utils/log";
+import { sha256Hex } from "../../utils/hash";
 import * as client from "../remarkable/client";
 import { fetchAnnotations } from "../remarkable/rmdoc";
-import { readPdfPageSizes, pageSizeAt } from "../remarkable/geometry";
+import { readPdfPageSizes } from "../remarkable/geometry";
 import {
   getRecord,
   setRecord,
   removeRecord,
   allRecords,
+  removeCompanionKey,
+  removeNoteRecord,
   type SyncRecord,
 } from "./state";
 import { applyAnnotations } from "./annotations";
+import { findCompanion } from "./docxCompanion";
 
 const IO = globalThis as any;
 
@@ -45,19 +49,49 @@ export function isSafeMode(): boolean {
   return getPref("safeMode") !== false;
 }
 
+/** Is this attachment's EPUB-ness detectable via Zotero's own API, or by content type? */
+export function isEpubAttachment(att: Zotero.Item): boolean {
+  const anyAtt = att as any;
+  if (typeof anyAtt.isEPUBAttachment === "function") {
+    return !!anyAtt.isEPUBAttachment();
+  }
+  return anyAtt.attachmentContentType === "application/epub+zip";
+}
+
+const DOCX_CONTENT_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+export function isDocxAttachment(att: Zotero.Item): boolean {
+  const anyAtt = att as any;
+  if (DOCX_CONTENT_TYPES.has(anyAtt.attachmentContentType)) return true;
+  return /\.docx$/i.test(anyAtt.attachmentFilename ?? "");
+}
+
+/** What kind of syncable document this attachment is, or null if none. */
+export type AttachmentKind = "pdf" | "epub" | "docx";
+
+export function attachmentKind(att: Zotero.Item): AttachmentKind | null {
+  if (att.isPDFAttachment()) return "pdf";
+  if (isEpubAttachment(att)) return "epub";
+  if (isDocxAttachment(att)) return "docx";
+  return null;
+}
+
 /**
  * Stop syncing an attachment: drop its sync record and remove the sync tag from
  * its parent item (so it is excluded from future syncs). Touches only Zotero —
  * never the device. Used when a document was deleted on the reMarkable.
  */
-async function stopSync(att: Zotero.Item): Promise<void> {
+export async function stopSync(att: Zotero.Item): Promise<void> {
   await removeRecord(att.key);
   const parent = att.parentItem;
   const tag = getSyncTag();
   if (parent && parent.hasTag(tag)) {
-    // Only drop the tag if no *other* PDF of this item is still synced.
+    // Only drop the tag if no *other* syncable attachment of this item is
+    // still synced.
     const others = Zotero.Items.get(parent.getAttachments()).filter(
-      (a) => a.isPDFAttachment() && a.key !== att.key,
+      (a) => attachmentKind(a) && a.key !== att.key,
     );
     const anyOther = (
       await Promise.all(others.map((a) => getRecord(a.key)))
@@ -66,6 +100,21 @@ async function stopSync(att: Zotero.Item): Promise<void> {
       parent.removeTag(tag);
       await parent.saveTx();
     }
+  }
+}
+
+/**
+ * Stop syncing a standalone/child note: drop its note record and the sync tag.
+ * Used when its document was deleted on the reMarkable. Notes have no PDF/EPUB
+ * attachment to key off — the note item itself carries both the tag and the
+ * (separately stored) sync record.
+ */
+export async function stopSyncNote(note: Zotero.Item): Promise<void> {
+  await removeNoteRecord(note.key);
+  const tag = getSyncTag();
+  if (note.hasTag(tag)) {
+    note.removeTag(tag);
+    await note.saveTx();
   }
 }
 
@@ -101,15 +150,40 @@ export function pdfAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   return out;
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const subtle = (globalThis as any).crypto.subtle;
-  const digest: ArrayBuffer = await subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+/** Collect the native EPUB attachments of the given regular items. */
+export function epubAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
+  const out: Zotero.Item[] = [];
+  for (const item of items) {
+    for (const att of Zotero.Items.get(item.getAttachments())) {
+      if (isEpubAttachment(att)) out.push(att);
+    }
+  }
+  return out;
 }
 
-function displayNameFor(att: Zotero.Item): string {
+/** Collect the DOCX attachments of the given regular items. */
+export function docxAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
+  const out: Zotero.Item[] = [];
+  for (const item of items) {
+    for (const att of Zotero.Items.get(item.getAttachments())) {
+      if (isDocxAttachment(att)) out.push(att);
+    }
+  }
+  return out;
+}
+
+/** Collect every PDF/EPUB/DOCX attachment of the given regular items. */
+export function syncableAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
+  const out: Zotero.Item[] = [];
+  for (const item of items) {
+    for (const att of Zotero.Items.get(item.getAttachments())) {
+      if (attachmentKind(att)) out.push(att);
+    }
+  }
+  return out;
+}
+
+export function displayNameFor(att: Zotero.Item): string {
   const parent = att.parentItem;
   const title = parent ? parent.getDisplayTitle() : "";
   return (title || att.attachmentFilename || "Untitled").trim();
@@ -209,6 +283,7 @@ export async function pushAll(
         docId: entry.id,
         docHash: entry.hash,
         fileHash,
+        kind: "pdf",
         visibleName: name,
         libraryID: att.libraryID,
         lastPushed: Date.now(),
@@ -262,8 +337,13 @@ export async function pullAll(
   };
 
   const records = await allRecords();
+  // This function pulls PDF page-geometry-based annotations only — EPUB
+  // records (native EPUBs and docx companions) are pulled via
+  // epubDocs.pullEpubAll, which understands CFI positions instead.
   const keys = Object.keys(records).filter(
-    (k) => !opts.onlyKeys || opts.onlyKeys.has(k),
+    (k) =>
+      (records[k].kind ?? "pdf") === "pdf" &&
+      (!opts.onlyKeys || opts.onlyKeys.has(k)),
   );
   log(`pullAll: start (${keys.length} synced record(s))`);
   if (keys.length === 0) return summary;
@@ -457,17 +537,25 @@ export async function removeFromSync(items: Zotero.Item[]): Promise<void> {
       await item.saveTx();
     }
     for (const att of Zotero.Items.get(item.getAttachments())) {
-      if (!att.isPDFAttachment()) continue;
-      const record = await getRecord(att.key);
-      if (record && api) {
-        try {
-          const entry = await client.findById(api, record.docId);
-          if (entry) await client.deleteDoc(api, entry.hash);
-        } catch {
-          // Best effort: leave the remote doc if deletion fails.
+      const kind = attachmentKind(att);
+      if (!kind) continue;
+      // A DOCX's actual synced document is its generated companion EPUB, if
+      // one exists — clean that record (and the docx->companion mapping) up
+      // too, rather than the (never-synced) .docx attachment's own key.
+      const target = kind === "docx" ? await findCompanion(att) : att;
+      if (target) {
+        const record = await getRecord(target.key);
+        if (record && api) {
+          try {
+            const entry = await client.findById(api, record.docId);
+            if (entry) await client.deleteDoc(api, entry.hash);
+          } catch {
+            // Best effort: leave the remote doc if deletion fails.
+          }
         }
+        await removeRecord(target.key);
       }
-      await removeRecord(att.key);
+      if (kind === "docx") await removeCompanionKey(att.key);
     }
   }
 }

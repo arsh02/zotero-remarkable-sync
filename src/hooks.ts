@@ -10,9 +10,10 @@ import * as scheduler from "./modules/scheduler";
 import * as engine from "./modules/sync/engine";
 import * as column from "./modules/column";
 import { preload as preloadState } from "./modules/sync/state";
+import { unsyncNotesByKeys } from "./modules/sync/notes";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "v0.2.0-safe-mode";
+const BUILD = "v0.2.0-epub-docx-notes";
 
 let notifierID: string | null = null;
 
@@ -148,7 +149,11 @@ async function onNotify(
   }
   if (keys.size === 0) return;
 
-  engine.unsyncByKeys([...keys]).catch((e) => log("unsync (notify) error:", e));
+  const keyList = [...keys];
+  engine.unsyncByKeys(keyList).catch((e) => log("unsync (notify) error:", e));
+  unsyncNotesByKeys(keyList).catch((e) =>
+    log("unsync notes (notify) error:", e),
+  );
 }
 
 /**

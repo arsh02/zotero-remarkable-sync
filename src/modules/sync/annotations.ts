@@ -1,11 +1,10 @@
 // Create native Zotero annotations (highlights + ink) on a PDF attachment from
 // parsed reMarkable pages.
 //
-// Pull is *non-destructive*: we never delete Zotero annotations (there is no
-// Zotero -> reMarkable path yet, so the Zotero side must be preserved). Instead
-// we dedup against the annotations already on the attachment by a content
-// signature and only create the ones that are missing. Re-pulling is therefore
-// idempotent and safe.
+// Pull mirrors the device onto annotations this plugin created (`ourKeys`):
+// add missing ones, remove ours that vanished on the device. User-authored
+// annotations are never deleted. EPUB annotations use a parallel path in
+// epubDocs.ts (CFI positions, not page geometry).
 
 import {
   rectToZotero,
@@ -22,7 +21,7 @@ import { log, errMsg } from "../../utils/log";
 // Zotero object-key charset (excludes 0/1/I/O).
 const KEY_CHARS = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
 
-function generateKey(): string {
+export function generateKey(): string {
   const gen = (Zotero as any).DataObjectUtilities?.generateKey;
   if (typeof gen === "function") return gen();
   let k = "";
@@ -120,7 +119,7 @@ export function existingSig(item: Zotero.Item): string | null {
   return null;
 }
 
-async function save(
+export async function save(
   attachment: Zotero.Item,
   json: Record<string, unknown>,
 ): Promise<string | null> {

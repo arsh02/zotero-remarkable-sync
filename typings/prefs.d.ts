@@ -14,6 +14,8 @@ declare namespace _ZoteroTypes {
       "syncInterval": number;
       "deleteOnUnsync": boolean;
       "safeMode": boolean;
+      "convertDocx": boolean;
+      "syncNotes": boolean;
     };
   }
 }

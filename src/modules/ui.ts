@@ -9,6 +9,8 @@ import { getString, getLocaleID } from "../utils/locale";
 import { log, errMsg } from "../utils/log";
 import * as engine from "./sync/engine";
 import { pushAnnotations } from "./sync/push";
+import { pullEpubAll, pushEpubAll, resolveEpubTargets } from "./sync/epubDocs";
+import { pushNotes } from "./sync/notes";
 import * as client from "./remarkable/client";
 
 // 96px icon (manifest/install). For in-app UI we use a small 32px variant so
@@ -85,7 +87,32 @@ export async function runSyncNow(): Promise<void> {
       const sent = await pushAnnotations(report);
       log("runSyncNow: push done, starting pull");
       const pull = await engine.pullAll(report);
-      return { push, sent, pull };
+
+      // EPUB documents are fully replaced on every annotation-bearing push
+      // (reMarkable has no in-place content update — see epubDocs.ts), so we
+      // pull first here to capture any not-yet-synced device highlights
+      // before they'd otherwise be lost — the opposite order from PDF above.
+      const epubPull = await pullEpubAll(report);
+      const epubPush = await pushEpubAll(report);
+      const notesPush = await pushNotes(report);
+
+      return {
+        push: {
+          pushed: push.pushed + epubPush.pushed + notesPush.pushed,
+          skipped: push.skipped + epubPush.skipped + notesPush.skipped,
+          stopped: push.stopped + epubPush.stopped + notesPush.stopped,
+          failed: push.failed + epubPush.failed + notesPush.failed,
+          errors: [...push.errors, ...epubPush.errors, ...notesPush.errors],
+        },
+        sent,
+        pull: {
+          updated: pull.updated + epubPull.updated,
+          annotations: pull.annotations + epubPull.annotations,
+          removed: pull.removed + epubPull.removed,
+          failed: pull.failed + epubPull.failed,
+          errors: [...pull.errors, ...epubPull.errors],
+        },
+      };
     };
     let push, sent, pull;
     try {
@@ -137,14 +164,17 @@ export async function runForcePull(): Promise<void> {
     .createLine({ text: getString("sync-running"), progress: 0 })
     .show();
   try {
-    const pull = await engine.pullAll(
-      (text, pct) => pw.changeLine({ progress: pct, text }),
-      { force: true },
-    );
+    const report = (text: string, pct: number) =>
+      pw.changeLine({ progress: pct, text });
+    const pull = await engine.pullAll(report, { force: true });
+    const epubPull = await pullEpubAll(report, { force: true });
     pw.changeLine({
       progress: 100,
       text: getString("pull-done", {
-        args: { added: pull.annotations, removed: pull.removed },
+        args: {
+          added: pull.annotations + epubPull.annotations,
+          removed: pull.removed + epubPull.removed,
+        },
       }),
     });
     pw.startCloseTimer(5000);
@@ -248,7 +278,8 @@ export async function runOverwriteFromZotero(
 ): Promise<void> {
   if (notConnected() || blockedBySafeMode()) return;
   const atts = engine.pdfAttachmentsOf(items);
-  if (atts.length === 0) {
+  const epubTargets = await resolveEpubTargets(items);
+  if (atts.length === 0 && epubTargets.length === 0) {
     new ztoolkit.ProgressWindow(config.addonName)
       .createLine({ text: getString("nothing-selected"), type: "fail" })
       .show(3000);
@@ -261,6 +292,10 @@ export async function runOverwriteFromZotero(
       pw.changeLine({ progress: pct, text });
     await engine.pushAll(report, { attachments: atts, force: true });
     const ann = await pushAnnotations(report, { onlyKeys });
+    // EPUB annotations are re-baked from the current Zotero state on every
+    // forced push, so no separate "pull first" step is needed here (unlike
+    // the regular sync cycle) — Zotero is explicitly declared the winner.
+    await pushEpubAll(report, { targets: epubTargets, force: true });
     pw.changeLine({
       progress: 100,
       text: getString("overwrite-zotero-done", { args: { sent: ann.pushed } }),
@@ -283,7 +318,9 @@ export async function runOverwriteFromRemarkable(
 ): Promise<void> {
   if (notConnected()) return;
   const atts = engine.pdfAttachmentsOf(items);
-  if (atts.length === 0) {
+  const epubTargets = await resolveEpubTargets(items);
+  const epubKeys = new Set(epubTargets.map((t) => t.att.key));
+  if (atts.length === 0 && epubKeys.size === 0) {
     new ztoolkit.ProgressWindow(config.addonName)
       .createLine({ text: getString("nothing-selected"), type: "fail" })
       .show(3000);
@@ -294,12 +331,19 @@ export async function runOverwriteFromRemarkable(
   try {
     const report = (text: string, pct: number) =>
       pw.changeLine({ progress: pct, text });
-    await engine.resetPullState([...onlyKeys]);
+    await engine.resetPullState([...onlyKeys, ...epubKeys]);
     const pull = await engine.pullAll(report, { force: true, onlyKeys });
+    const epubPull = await pullEpubAll(report, {
+      force: true,
+      onlyKeys: epubKeys,
+    });
     pw.changeLine({
       progress: 100,
       text: getString("overwrite-remarkable-done", {
-        args: { added: pull.annotations, removed: pull.removed },
+        args: {
+          added: pull.annotations + epubPull.annotations,
+          removed: pull.removed + epubPull.removed,
+        },
       }),
     });
     pw.startCloseTimer(5000);
