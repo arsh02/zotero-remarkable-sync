@@ -25,8 +25,8 @@ async function tick(): Promise<void> {
     await engine.pushAll();
     await pushAnnotations();
     await engine.pullAll();
-    // EPUB: pull before push — a push may fully replace the document (see
-    // epubDocs.ts), so pull first to capture any pending device highlights.
+    // DOCX companions: pull before push — a push may fully replace the
+    // generated EPUB (see epubDocs.ts), so pull first to capture highlights.
     await pullEpubAll();
     await pushEpubAll();
     await pushNotes();

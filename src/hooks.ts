@@ -13,7 +13,7 @@ import { preload as preloadState } from "./modules/sync/state";
 import { unsyncNotesByKeys } from "./modules/sync/notes";
 
 // Build marker — bump when shipping a build you want to confirm is loaded.
-const BUILD = "v0.2.0-epub-docx-notes";
+const BUILD = "v0.2.0-docx-notes";
 
 let notifierID: string | null = null;
 

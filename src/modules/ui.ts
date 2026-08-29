@@ -88,9 +88,9 @@ export async function runSyncNow(): Promise<void> {
       log("runSyncNow: push done, starting pull");
       const pull = await engine.pullAll(report);
 
-      // EPUB documents are fully replaced on every annotation-bearing push
-      // (reMarkable has no in-place content update — see epubDocs.ts), so we
-      // pull first here to capture any not-yet-synced device highlights
+      // DOCX companion EPUBs are fully replaced on every annotation-bearing
+      // push (reMarkable has no in-place content update — see epubDocs.ts), so
+      // we pull first here to capture any not-yet-synced device highlights
       // before they'd otherwise be lost — the opposite order from PDF above.
       const epubPull = await pullEpubAll(report);
       const epubPush = await pushEpubAll(report);
@@ -292,9 +292,8 @@ export async function runOverwriteFromZotero(
       pw.changeLine({ progress: pct, text });
     await engine.pushAll(report, { attachments: atts, force: true });
     const ann = await pushAnnotations(report, { onlyKeys });
-    // EPUB annotations are re-baked from the current Zotero state on every
-    // forced push, so no separate "pull first" step is needed here (unlike
-    // the regular sync cycle) — Zotero is explicitly declared the winner.
+    // Companion annotations are re-baked from the current Zotero state on
+    // every forced push, so no separate "pull first" step is needed here.
     await pushEpubAll(report, { targets: epubTargets, force: true });
     pw.changeLine({
       progress: 100,

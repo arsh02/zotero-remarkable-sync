@@ -1,5 +1,7 @@
-// Orchestrates EPUB sync: native Zotero EPUB attachments and DOCX-generated
-// companion EPUBs (see docxCompanion.ts) both funnel through here.
+// Orchestrates sync of DOCX-generated companion EPUBs (see docxCompanion.ts).
+// Native Zotero EPUB attachments are not synced — reMarkable still receives
+// an EPUB for DOCX (and notes) because that is the only non-PDF format its
+// cloud API accepts.
 //
 // Unlike the PDF pipeline (file bytes never change; annotations are patched
 // into small per-page `.rm` sidecars — see push.ts), reMarkable's API has no
@@ -10,7 +12,7 @@
 //
 // Because a full re-upload replaces the document, any not-yet-pulled
 // highlights the user made directly on the device would otherwise be lost.
-// To minimise that, callers MUST pull before push for EPUB documents (the
+// To minimise that, callers MUST pull before push for these documents (the
 // opposite order from the PDF pipeline) — see ui.ts's runSyncNow.
 
 import { getPref } from "../../utils/prefs";
@@ -38,7 +40,6 @@ import {
 import { save as saveAnnotation } from "./annotations";
 import {
   findSyncItems,
-  epubAttachmentsOf,
   docxAttachmentsOf,
   displayNameFor,
   isSafeMode,
@@ -48,6 +49,14 @@ import {
   type PullSummary,
 } from "./engine";
 import { ensureCompanion } from "./docxCompanion";
+import {
+  identityTag,
+  fingerprintTag,
+  findByIdentity,
+  hasTag,
+  reconcileDuplicates,
+  deleteSuperseded,
+} from "./dedupe";
 
 const IO = globalThis as any;
 const PUSHABLE_TYPES = new Set(["highlight", "underline"]);
@@ -57,16 +66,14 @@ export interface EpubTarget {
   sourceKind: EpubSourceKind;
 }
 
-/** Resolve tagged items (or an explicit list) to their EPUB sync targets,
- *  generating/refreshing DOCX companions along the way. */
+/** Resolve tagged items (or an explicit list) to DOCX companion EPUB targets,
+ *  generating/refreshing companions along the way. Native EPUB attachments
+ *  are ignored. */
 export async function resolveEpubTargets(
   items?: Zotero.Item[],
 ): Promise<EpubTarget[]> {
   const regularItems = items ?? (await findSyncItems());
-  const targets: EpubTarget[] = epubAttachmentsOf(regularItems).map((att) => ({
-    att,
-    sourceKind: "native-epub" as const,
-  }));
+  const targets: EpubTarget[] = [];
   for (const docxAtt of docxAttachmentsOf(regularItems)) {
     const companion = await ensureCompanion(docxAtt);
     if (companion) {
@@ -184,7 +191,9 @@ export async function pullEpubAll(
   const records = await allRecords();
   const keys = Object.keys(records).filter(
     (k) =>
-      records[k].kind === "epub" && (!opts.onlyKeys || opts.onlyKeys.has(k)),
+      records[k].kind === "epub" &&
+      records[k].sourceKind === "docx-companion" &&
+      (!opts.onlyKeys || opts.onlyKeys.has(k)),
   );
   log(`pullEpubAll: start (${keys.length} synced record(s))`);
   if (keys.length === 0) return summary;
@@ -313,7 +322,7 @@ export async function pushEpubAll(
   const api = await client.getApi();
   const folder = getPref("folder") || "";
   const folderId = await client.ensureFolder(api, folder);
-  const remote = await api.listItems(true);
+  const remote = await reconcileDuplicates(api, await api.listItems(true));
   const byId = new Map(remote.map((e) => [e.id, e]));
   const safeMode = isSafeMode();
 
@@ -332,16 +341,12 @@ export async function pushEpubAll(
       }
       const sourceBytes: Uint8Array = await IO.IOUtils.read(path);
       const fileHash = await sha256Hex(sourceBytes);
+      const idTag = identityTag(att.libraryID, att.key);
+      const fpTag = fingerprintTag(fileHash);
 
       const existing = await getRecord(att.key);
+      const cloudMatch = findByIdentity(remote, idTag);
       const missingOnDevice = !!existing && !byId.has(existing.docId);
-      if (missingOnDevice && !opts.force) {
-        log(`pushEpubAll: "${name}" was deleted on reMarkable — stopping sync`);
-        await stopSync(att);
-        summary.stopped++;
-        done++;
-        continue;
-      }
 
       // Zotero-origin highlights/underlines not already pulled from the
       // device — these are what get baked into the uploaded copy.
@@ -360,6 +365,53 @@ export async function pushEpubAll(
         pushableKeys.length !== priorKeys.length ||
         pushableKeys.some((k, i) => k !== priorKeys[i]);
       const sourceChanged = !existing || existing.fileHash !== fileHash;
+
+      // Matching identity+fingerprint on the cloud: another machine already
+      // pushed this source. Skip unless this machine has annotations to bake
+      // (those still require a full re-upload).
+      if (
+        !opts.force &&
+        cloudMatch &&
+        hasTag(cloudMatch, fpTag) &&
+        !annotationsChanged
+      ) {
+        const alreadyTracked =
+          !!existing &&
+          existing.docId === cloudMatch.id &&
+          existing.fileHash === fileHash;
+        if (!alreadyTracked) {
+          const sameDoc = existing?.docId === cloudMatch.id;
+          await setRecord(att.key, {
+            docId: cloudMatch.id,
+            docHash: cloudMatch.hash,
+            fileHash,
+            contentHash: sameDoc ? existing?.contentHash : undefined,
+            kind: "epub",
+            sourceKind,
+            visibleName: name,
+            libraryID: att.libraryID,
+            lastPushed: sameDoc && existing ? existing.lastPushed : Date.now(),
+            lastPulledVersion: sameDoc
+              ? existing?.lastPulledVersion
+              : undefined,
+            annotationKeys: sameDoc ? existing?.annotationKeys : [],
+            pushedKeys: sameDoc ? existing?.pushedKeys : [],
+            companionKey: existing?.companionKey,
+          });
+          log(`pushEpubAll: adopt "${name}" from cloud (${cloudMatch.id})`);
+        }
+        summary.skipped++;
+        done++;
+        continue;
+      }
+
+      if (missingOnDevice && !cloudMatch && !opts.force) {
+        log(`pushEpubAll: "${name}" was deleted on reMarkable — stopping sync`);
+        await stopSync(att);
+        summary.stopped++;
+        done++;
+        continue;
+      }
 
       if (
         !opts.force &&
@@ -419,21 +471,21 @@ export async function pushEpubAll(
       }
 
       log(`pushEpubAll: uploading "${name}" (${uploadBytes.length} bytes) …`);
-      const entry = await client.uploadEpub(api, name, uploadBytes, folderId);
+      const entry = await client.uploadEpub(api, name, uploadBytes, folderId, [
+        idTag,
+        fpTag,
+      ]);
 
       // Best-effort: remove the superseded device document so re-uploads
       // (which always mint a new document id) don't accumulate duplicates.
-      if (existing && !missingOnDevice) {
-        const old = byId.get(existing.docId);
-        if (old) {
-          try {
-            await client.deleteDoc(api, old.hash);
-          } catch (e) {
-            log(
-              `pushEpubAll: could not delete old doc for "${name}": ${errMsg(e)}`,
-            );
-          }
-        }
+      // Covers both this machine's previous copy and a stale copy another
+      // machine pushed (identity tag present, fingerprint no longer matches).
+      const staleIds = new Set<string>();
+      if (existing && !missingOnDevice) staleIds.add(existing.docId);
+      if (cloudMatch) staleIds.add(cloudMatch.id);
+      staleIds.delete(entry.id);
+      for (const id of staleIds) {
+        await deleteSuperseded(api, byId.get(id), `pushEpubAll "${name}"`);
       }
 
       const record: SyncRecord = {

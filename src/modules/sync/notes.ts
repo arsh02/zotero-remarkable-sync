@@ -22,6 +22,14 @@ import {
   type ProgressFn,
   type SyncSummary,
 } from "./engine";
+import {
+  identityTag,
+  fingerprintTag,
+  findByIdentity,
+  hasTag,
+  reconcileDuplicates,
+  deleteSuperseded,
+} from "./dedupe";
 
 /** Find tagged note items (standalone or child) in one library. */
 async function findSyncNotesIn(libraryID: number): Promise<Zotero.Item[]> {
@@ -84,7 +92,7 @@ export async function pushNotes(
   const api = await client.getApi();
   const folder = getPref("folder") || "";
   const folderId = await client.ensureFolder(api, folder);
-  const remote = await api.listItems(true);
+  const remote = await reconcileDuplicates(api, await api.listItems(true));
   const byId = new Map(remote.map((e) => [e.id, e]));
 
   let done = 0;
@@ -95,10 +103,36 @@ export async function pushNotes(
     try {
       const html = note.getNote?.() ?? "";
       const contentHash = await utf8Hash(html);
+      const idTag = identityTag(note.libraryID, note.key);
+      const fpTag = fingerprintTag(contentHash);
 
       const existing = await getNoteRecord(note.key);
+      const cloudMatch = findByIdentity(remote, idTag);
       const missingOnDevice = !!existing && !byId.has(existing.docId);
-      if (missingOnDevice && !opts.force) {
+
+      if (!opts.force && cloudMatch && hasTag(cloudMatch, fpTag)) {
+        const alreadyTracked =
+          !!existing &&
+          existing.docId === cloudMatch.id &&
+          existing.contentHash === contentHash;
+        if (!alreadyTracked) {
+          const sameDoc = existing?.docId === cloudMatch.id;
+          await setNoteRecord(note.key, {
+            docId: cloudMatch.id,
+            docHash: cloudMatch.hash,
+            contentHash,
+            visibleName: name,
+            libraryID: note.libraryID,
+            lastPushed: sameDoc && existing ? existing.lastPushed : Date.now(),
+          });
+          log(`pushNotes: adopt "${name}" from cloud (${cloudMatch.id})`);
+        }
+        summary.skipped++;
+        done++;
+        continue;
+      }
+
+      if (missingOnDevice && !cloudMatch && !opts.force) {
         log(`pushNotes: "${name}" was deleted on reMarkable — stopping sync`);
         await stopSyncNote(note);
         summary.stopped++;
@@ -123,19 +157,17 @@ export async function pushNotes(
       );
 
       log(`pushNotes: uploading "${name}" (${epubBytes.length} bytes) …`);
-      const entry = await client.uploadEpub(api, name, epubBytes, folderId);
+      const entry = await client.uploadEpub(api, name, epubBytes, folderId, [
+        idTag,
+        fpTag,
+      ]);
 
-      if (existing && !missingOnDevice) {
-        const old = byId.get(existing.docId);
-        if (old) {
-          try {
-            await client.deleteDoc(api, old.hash);
-          } catch (e) {
-            log(
-              `pushNotes: could not delete old doc for "${name}": ${errMsg(e)}`,
-            );
-          }
-        }
+      const staleIds = new Set<string>();
+      if (existing && !missingOnDevice) staleIds.add(existing.docId);
+      if (cloudMatch) staleIds.add(cloudMatch.id);
+      staleIds.delete(entry.id);
+      for (const id of staleIds) {
+        await deleteSuperseded(api, byId.get(id), `pushNotes "${name}"`);
       }
 
       const record: NoteSyncRecord = {

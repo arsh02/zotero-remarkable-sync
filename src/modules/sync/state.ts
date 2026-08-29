@@ -5,7 +5,9 @@
 /** What kind of document is on the other end of this record. */
 export type DocKind = "pdf" | "epub";
 
-/** How an "epub" record's content was produced. */
+/** How an "epub" record's content was produced. Native Zotero EPUB
+ *  attachments are no longer synced; "native-epub" is only read for
+ *  leftover records from older builds. */
 export type EpubSourceKind = "native-epub" | "docx-companion";
 
 export interface SyncRecord {
@@ -14,8 +16,8 @@ export interface SyncRecord {
   /** reMarkable document hash at last push */
   docHash: string;
   /** sha-256 of the *source* bytes last pushed (hex) — guards against
-   *  re-upload. For "pdf"/native-epub this is the attachment file itself;
-   *  for a docx-companion epub this is the original .docx's hash. */
+   *  re-upload. For "pdf" this is the attachment file itself; for a
+   *  docx-companion epub this is the original .docx's hash. */
   fileHash: string;
   /** sha-256 of the bytes actually uploaded (post EPUB highlight-baking).
    *  Only meaningful for kind === "epub" — lets us tell "source changed" apart

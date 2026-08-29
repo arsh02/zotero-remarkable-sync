@@ -124,8 +124,8 @@ export async function uploadPdf(
 
 /**
  * Upload an EPUB into a folder, returning the new document's id and hash.
- * Used for native Zotero EPUB attachments, DOCX-derived companion EPUBs, and
- * EPUBs generated from Zotero notes.
+ * Used for DOCX-derived companion EPUBs and EPUBs generated from Zotero notes.
+ * Native Zotero EPUB attachments are not synced.
  */
 export async function uploadEpub(
   api: RemarkableApi,

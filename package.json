@@ -2,7 +2,7 @@
   "name": "zotero-remarkable-sync",
   "type": "module",
   "version": "0.2.0",
-  "description": "Sync Zotero PDFs, EPUBs, DOCX, notes and annotations with a reMarkable tablet",
+  "description": "Sync Zotero PDFs, DOCX, notes and annotations with a reMarkable tablet",
   "config": {
     "addonName": "Zotero reMarkable Sync",
     "addonID": "zotero-remarkable-sync@piwowarski.fr",
@@ -32,6 +32,7 @@
     "test": "zotero-plugin test",
     "test:parser": "esbuild src/modules/remarkable/rmlines.ts --bundle --format=esm --outfile=.scaffold/rmlines.mjs --log-level=error && node test/rmlines.verify.mjs",
     "test:writer": "esbuild src/modules/remarkable/rmlines.ts --bundle --format=esm --outfile=.scaffold/rmlines.mjs --log-level=error && esbuild src/modules/remarkable/rmwrite.ts --bundle --format=esm --outfile=.scaffold/rmwrite.mjs --log-level=error && node test/rmwrite.verify.mjs",
+    "prereqs:macos": "bash scripts/macos-m1-prereqs.sh",
     "update-deps": "npm update --save",
     "prepare": "husky"
   },

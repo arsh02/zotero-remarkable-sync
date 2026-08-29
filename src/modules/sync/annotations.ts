@@ -3,8 +3,8 @@
 //
 // Pull mirrors the device onto annotations this plugin created (`ourKeys`):
 // add missing ones, remove ours that vanished on the device. User-authored
-// annotations are never deleted. EPUB annotations use a parallel path in
-// epubDocs.ts (CFI positions, not page geometry).
+// annotations are never deleted. DOCX companion annotations use a parallel
+// path in epubDocs.ts (CFI positions, not page geometry).
 
 import {
   rectToZotero,
