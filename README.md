@@ -105,8 +105,9 @@ npm run build    # produces build/*.xpi (and type-checks with tsc)
 The build is driven by [`zotero-plugin-scaffold`](https://github.com/northword/zotero-plugin-scaffold)
 (see `zotero-plugin.config.ts`), which bundles `src/` with esbuild, injects the
 manifest/locale files from `addon/`, and zips the result into a versioned `.xpi` under
-`build/`. To install it, open Zotero → Settings → Add-ons → the gear menu → _Install
-Add-on From File…_ and pick the generated `.xpi`. During development, `npm start` is
+`.scaffold/build/`, then copies that file to `build/` for install. To install it,
+open Zotero → Settings → Add-ons → the gear menu → _Install Add-on From File…_ and
+pick `build/*.xpi`. During development, `npm start` is
 faster: it launches (or attaches to) a Zotero profile with the plugin loaded and
 hot-reloads on file changes.
 

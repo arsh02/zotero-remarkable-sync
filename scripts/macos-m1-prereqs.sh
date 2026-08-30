@@ -239,7 +239,7 @@ ensure_npm_deps
 maybe_build
 
 printf '\nDone. %d installed, %d already present.\n' "$installed" "$skipped"
-printf 'Next: npm run build   # writes .scaffold/build/*.xpi\n'
+printf 'Next: npm run build   # writes .scaffold/build/*.xpi and copies it to build/\n'
 if [[ "$DO_BUILD" -eq 0 ]]; then
   printf '      or re-run with --build to compile the .xpi now.\n'
 fi

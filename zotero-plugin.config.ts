@@ -1,3 +1,5 @@
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
 
@@ -37,6 +39,18 @@ export default defineConfig({
         outfile: `.scaffold/build/addon/content/scripts/${pkg.config.addonRef}.js`,
       },
     ],
+    hooks: {
+      "build:done": (ctx) => {
+        const xpiName = `${ctx.xpiName}.xpi`;
+        const src = join(ctx.dist, xpiName);
+        // Dev/serve builds skip packing, so there is nothing to copy.
+        if (!existsSync(src)) return;
+        mkdirSync("build", { recursive: true });
+        const dest = join("build", xpiName);
+        copyFileSync(src, dest);
+        ctx.logger.info(`Copied XPI to ${dest}`);
+      },
+    },
   },
 
   test: {
