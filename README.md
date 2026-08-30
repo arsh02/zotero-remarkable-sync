@@ -104,6 +104,27 @@ If two machines push a never-before-synced item in the same few seconds, both
 may briefly create a document. The next sync on either machine detects the
 duplicate identity tags, keeps the newest, and deletes the rest.
 
+### Import PDFs already on the reMarkable
+
+PDFs you added to the tablet some other way (the reMarkable web/desktop app,
+email, another tool) are invisible to this plugin until they have a matching
+Zotero item. **Tools → reMarkable: Import untracked PDFs…** scans the
+configured sync folder (the same folder the plugin pushes into — not
+subfolders, not the rest of the account) for PDFs that:
+
+- this machine has no sync record for, and
+- no machine has stamped with a `zrs-id-` tag.
+
+A confirmation list lets you pick which to import. Each selected PDF is
+downloaded, added as a new Zotero document in a **reMarkable Imports**
+collection, tagged for future sync, and stamped with the usual
+`zrs-id-`/`zrs-fp-` cloud tags so other machines adopt it instead of
+uploading a duplicate. The next **Sync now** then pulls any annotations
+already on the device.
+
+This command is manual and opt-in. Regular sync never imports untracked files
+on its own.
+
 ## Development
 
 On **macOS Apple Silicon (M1/M2/M3)**, run the prerequisite script first. It
@@ -142,7 +163,8 @@ npm run build    # type-checks and writes .scaffold/build/*.xpi
 The build is driven by [`zotero-plugin-scaffold`](https://github.com/northword/zotero-plugin-scaffold)
 (see `zotero-plugin.config.ts`), which bundles `src/` with esbuild, injects the
 manifest/locale files from `addon/`, and zips the result into a versioned `.xpi`
-under `.scaffold/build/`. To install it, open Zotero → Settings → Add-ons → the
+under `.scaffold/build/` (the prereqs `--build` flag also copies it to `build/`).
+To install it, open Zotero → Settings → Add-ons → the
 gear menu → _Install Add-on From File…_ and pick the generated `.xpi`. During
 development, `npm start` is faster: it launches (or attaches to) a Zotero
 profile with the plugin loaded and hot-reloads on file changes.
@@ -156,9 +178,22 @@ is unaffected by the Node version used to _build_).
 
 ### Connecting to reMarkable
 
-In the plugin preferences, paste a one-time code from
-<https://my.remarkable.com/device/browser/connect> and click **Connect**. The resulting
+Google Chrome is **not** required. In **Firefox** (or any browser), open
+<https://my.remarkable.com/device/desktop/connect>, copy the 8-letter code,
+paste it in the plugin preferences, and click **Connect**. The resulting
 device token is stored in Zotero preferences.
+
+(`chrome://…` messages in Zotero's log are internal Mozilla UI paths, not a
+request for Google Chrome.)
+
+If **Connect** succeeds but **Sync now** fails with
+`NetworkError when attempting to fetch resource` against
+`eu.tectonic.remarkable.com`, install a build that routes reMarkable traffic
+through Zotero's privileged HTTP stack (look for `v0.3.5-zotero-http` in
+Help → Debug Output Logging). The sandbox `fetch` is CORS-limited; the
+`Authorization` header on the sync API triggers that. If the same error
+remains after that build is loaded, the host is blocked by a firewall or
+proxy — try opening that URL in Firefox.
 
 ### Works with any Zotero installation/storage setup
 
@@ -176,14 +211,16 @@ file layout, or sync backend. In particular:
 
 ## Usage
 
-- **Connect**: Settings → _Zotero reMarkable Sync_ → paste a one-time code from
-  <https://my.remarkable.com/device/browser/connect>.
+- **Connect**: Settings → _Zotero reMarkable Sync_ → open
+  <https://my.remarkable.com/device/desktop/connect> in Firefox (Chrome is not
+  required), paste the 8-letter code, and click **Connect**.
 - **Sync**: tag an item `@remarkable` (right-click → _reMarkable: Add to sync_) — this
   covers all of its PDF and DOCX attachments — then the toolbar **Sync now** button (or
   set an interval in preferences). To sync a note on its own, tag the note item itself
   (via Zotero's normal tag UI).
 - **Tools menu**: _Sync now_, _Force re-pull annotations_, _Remove pulled
-  annotations_ (removes only plugin-created annotations).
+  annotations_ (removes only plugin-created annotations), _Import untracked
+  PDFs…_ (see [Import PDFs already on the reMarkable](#import-pdfs-already-on-the-remarkable)).
 - **Per-item**: right-click a synced item → _Overwrite device from Zotero_ / _Overwrite
   Zotero from device_ to force one side to win for just that item.
 

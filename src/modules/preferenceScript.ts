@@ -1,6 +1,7 @@
 import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
+import { log, errMsg } from "../utils/log";
 import * as client from "./remarkable/client";
 import * as scheduler from "./scheduler";
 
@@ -56,6 +57,11 @@ export function updateConnectionStatus() {
 }
 
 function bindPrefEvents() {
+  el("connect-link")?.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    Zotero.launchURL(client.CONNECT_URL);
+  });
+
   el("connect")?.addEventListener("command", async () => {
     const input = el("code") as HTMLInputElement | null;
     const code = input?.value?.trim();
@@ -66,9 +72,10 @@ function bindPrefEvents() {
       if (input) input.value = "";
       updateConnectionStatus();
     } catch (e) {
+      log("connect failed:", e);
       setStatus(
         getString("pref-connection-status-error", {
-          args: { error: (e as Error).message ?? String(e) },
+          args: { error: errMsg(e) },
         }),
       );
     }

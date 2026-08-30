@@ -222,9 +222,12 @@ maybe_build() {
   prefer_homebrew_path
   npm run build
   local xpi
-  xpi="$(ls -1 "${ROOT}/.scaffold/build/"*.xpi 2>/dev/null | head -1 || true)"
+  xpi="$(ls -1t "${ROOT}/.scaffold/build/"*.xpi 2>/dev/null | head -1 || true)"
   [[ -n "$xpi" && -f "$xpi" ]] || die "Build finished but no .xpi appeared under ${ROOT}/.scaffold/build/."
+  mkdir -p "${ROOT}/build"
+  cp -f "$xpi" "${ROOT}/build/"
   ok "$xpi ($(du -h "$xpi" | awk '{print $1}'))"
+  ok "copied to ${ROOT}/build/$(basename "$xpi")"
 }
 
 ensure_arm64_macos
@@ -239,7 +242,7 @@ ensure_npm_deps
 maybe_build
 
 printf '\nDone. %d installed, %d already present.\n' "$installed" "$skipped"
-printf 'Next: npm run build   # writes .scaffold/build/*.xpi\n'
+printf 'Next: npm run build   # writes .scaffold/build/*.xpi (and copies to build/)\n'
 if [[ "$DO_BUILD" -eq 0 ]]; then
   printf '      or re-run with --build to compile the .xpi now.\n'
 fi

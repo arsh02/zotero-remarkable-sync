@@ -27,10 +27,13 @@ function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
   // _ztoolkit.basicOptions.debug.disableDebugBridgePassword =
   //   __env__ === "development";
   _ztoolkit.basicOptions.api.pluginID = config.addonID;
-  _ztoolkit.ProgressWindow.setIconURI(
-    "default",
-    `chrome://${config.addonRef}/content/icons/favicon.png`,
-  );
+  const iconBase = `chrome://${config.addonRef}/content/icons`;
+  // Zotero 9 removed chrome://zotero/skin/{tick,cross}.png. Point the
+  // toolkit ProgressWindow at icons we ship so fail/success lines do not
+  // log "Missing chrome or resource URL".
+  _ztoolkit.ProgressWindow.setIconURI("default", `${iconBase}/favicon.png`);
+  _ztoolkit.ProgressWindow.setIconURI("success", `${iconBase}/tick.svg`);
+  _ztoolkit.ProgressWindow.setIconURI("fail", `${iconBase}/cross.svg`);
 }
 
 import { BasicTool, unregister } from "zotero-plugin-toolkit";

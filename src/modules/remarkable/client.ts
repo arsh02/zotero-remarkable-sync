@@ -3,7 +3,7 @@
 // put* operations (which throw GenerationError on a stale root generation).
 
 import { register, remarkable, GenerationError } from "rmapi-js";
-import type { Entry, RemarkableApi, SimpleEntry } from "rmapi-js";
+import type { Entry, RemarkableApi, SimpleEntry, Tag } from "rmapi-js";
 import { getPref, setPref, clearPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
 
@@ -21,12 +21,22 @@ export function isConnected(): boolean {
 }
 
 /**
- * Exchange a one-time code (from my.remarkable.com/device/browser/connect) for a
- * long-lived device token and persist it.
+ * Exchange a one-time code (from my.remarkable.com/device/desktop/connect)
+ * for a long-lived device token and persist it. Open that page in Firefox —
+ * Google Chrome is not required. `deviceDesc` is an API label for this
+ * desktop app, not a request to launch Chrome.
  */
+export const CONNECT_URL = "https://my.remarkable.com/device/desktop/connect";
+
+function deviceDesc(): "desktop-windows" | "desktop-macos" | "desktop-linux" {
+  if (Zotero.isMac) return "desktop-macos";
+  if (Zotero.isWin) return "desktop-windows";
+  return "desktop-linux";
+}
+
 export async function connect(code: string): Promise<void> {
   ensureNetworkGlobals();
-  const token = await register(code.trim(), { deviceDesc: "browser-chrome" });
+  const token = await register(code.trim(), { deviceDesc: deviceDesc() });
   setPref("deviceToken", token);
   cachedApi = null;
 }
@@ -154,4 +164,19 @@ export async function deleteDoc(
   hash: string,
 ): Promise<void> {
   await withGenerationRetry(() => api.delete(hash));
+}
+
+/**
+ * Replace a document's tag list. Returns the new document hash (content
+ * edits change the hash; the document id stays the same).
+ */
+export async function updateDocTags(
+  api: RemarkableApi,
+  hash: string,
+  tags: Tag[],
+): Promise<string> {
+  const result = await withGenerationRetry(() =>
+    api.updateDocument(hash, { tags }),
+  );
+  return result.hash;
 }
