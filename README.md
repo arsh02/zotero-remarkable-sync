@@ -189,11 +189,19 @@ request for Google Chrome.)
 If **Connect** succeeds but **Sync now** fails with
 `NetworkError when attempting to fetch resource` against
 `eu.tectonic.remarkable.com`, install a build that routes reMarkable traffic
-through Zotero's privileged HTTP stack (look for `v0.3.5-zotero-http` in
-Help → Debug Output Logging). The sandbox `fetch` is CORS-limited; the
-`Authorization` header on the sync API triggers that. If the same error
-remains after that build is loaded, the host is blocked by a firewall or
-proxy — try opening that URL in Firefox.
+through Zotero's privileged HTTP stack (look for `v0.3.5-zotero-http` or
+later in Help → Debug Output Logging). The sandbox `fetch` is CORS-limited;
+the `Authorization` header on the sync API triggers that.
+
+If the error popup itself looks cut off with no real detail after "Network
+error reaching reMarkable" — Zotero's native progress popup truncates long
+lines and no CSS can override it — a build from `v0.3.6-error-details`
+onward also opens a small dialog with the full error text and a **Copy**
+button whenever a sync action fails; use that to see (and share) the actual
+cause. If that dialog still shows "unknown error (no message from
+Zotero.HTTP)" or a raw `nsresult`, the host itself is unreachable — a
+firewall or proxy is blocking it. Confirm by opening
+`https://eu.tectonic.remarkable.com/sync/v4/root` in Firefox.
 
 ### Works with any Zotero installation/storage setup
 

@@ -184,21 +184,55 @@ function parseResponseHeaders(xhr: XMLHttpRequest): Record<string, string> {
 }
 
 function rewriteFetchError(e: unknown, input: unknown): Error {
-  const a = e as any;
-  const name = typeof a?.name === "string" ? a.name : "";
-  const raw =
-    typeof a?.message === "string" && a.message
-      ? a.message
-      : typeof e === "string"
-        ? e
-        : String(e ?? "unknown error");
   const url = describeUrl(input);
-  if (name === "AbortError" || /abort/i.test(raw) || /timeout/i.test(raw)) {
+  const detail = describeException(e);
+  if (/abort/i.test(detail) || /timeout/i.test(detail)) {
     return new Error(
-      `reMarkable request timed out after ${FETCH_TIMEOUT_MS / 1000}s (${url})`,
+      `reMarkable request timed out after ${FETCH_TIMEOUT_MS / 1000}s (${url}): ${detail}`,
     );
   }
-  return new Error(`Network error reaching reMarkable (${url}): ${raw}`);
+  return new Error(`Network error reaching reMarkable (${url}): ${detail}`);
+}
+
+/**
+ * Pull every scrap of diagnostic info out of a thrown value. Zotero.HTTP's
+ * rejections are XPCOM-flavored: `.message` is frequently empty, and the
+ * useful bits — HTTP status, the underlying nsresult, the exception's real
+ * class name — live on non-enumerable properties that `String(e)` and
+ * `JSON.stringify(e)` both drop. Never return an empty string: a message
+ * like "unknown error (no message from Zotero.HTTP)" is itself a diagnostic
+ * finding, not a failure to report one.
+ */
+function describeException(e: unknown): string {
+  const a = e as any;
+  const bits: string[] = [];
+  const ctor = a?.constructor?.name;
+  if (typeof a?.name === "string" && a.name) bits.push(a.name);
+  else if (ctor && ctor !== "Object" && ctor !== "Error") bits.push(ctor);
+  if (typeof a?.message === "string" && a.message) bits.push(a.message);
+
+  const xhr = a?.xmlhttp;
+  if (xhr) {
+    if (typeof xhr.status === "number" && xhr.status) {
+      bits.push(`http ${xhr.status} ${xhr.statusText || ""}`.trim());
+    }
+    const nsresult = xhr.channel?.status;
+    if (typeof nsresult === "number" && nsresult) {
+      bits.push(`nsresult 0x${(nsresult >>> 0).toString(16)}`);
+    }
+  }
+
+  if (bits.length === 0) {
+    try {
+      const s = typeof e === "string" ? e : String(e);
+      if (s && s !== "[object Object]" && s !== "undefined") bits.push(s);
+    } catch {
+      /* ignore */
+    }
+  }
+  return bits.length
+    ? bits.join(" — ")
+    : "unknown error (no message from Zotero.HTTP)";
 }
 
 function describeUrl(input: unknown): string {

@@ -4,6 +4,9 @@
 // @ts-nocheck
 export type FluentMessageId =
   | 'clear-done'
+  | 'error-close'
+  | 'error-copy'
+  | 'error-dialog-title'
   | 'import-confirm-body'
   | 'import-confirm-cancel'
   | 'import-confirm-import'

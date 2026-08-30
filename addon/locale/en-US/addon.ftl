@@ -37,3 +37,6 @@ import-confirm-body = These PDFs are already on the reMarkable in the sync folde
 import-confirm-import = Import
 import-confirm-cancel = Cancel
 import-done = Imported { $imported } of { $total } PDF(s) into reMarkable Imports
+error-dialog-title = reMarkable Sync — Error Details
+error-copy = Copy
+error-close = Close

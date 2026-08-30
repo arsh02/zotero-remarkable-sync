@@ -53,3 +53,25 @@ export function errMsg(e: unknown): string {
   }
   return safeStringify(e);
 }
+
+/**
+ * Multi-line diagnostic dump for a thrown value: type/name, message, and the
+ * first few stack frames. Meant for a copyable detail dialog, not the
+ * one-line progress popup (Zotero's native progress window truncates long
+ * lines with XUL `crop`, which no amount of CSS can override).
+ */
+export function errDetail(e: unknown): string {
+  const lines: string[] = [];
+  const a = e as any;
+  const ctor = a?.constructor?.name;
+  if (ctor && ctor !== "Object" && ctor !== "Error")
+    lines.push(`type: ${ctor}`);
+  lines.push(errMsg(e));
+  if (typeof a?.stack === "string" && a.stack) {
+    const frames = a.stack.split("\n").slice(0, 6).join("\n");
+    if (frames && frames !== lines[lines.length - 1]) {
+      lines.push("", frames);
+    }
+  }
+  return lines.join("\n");
+}

@@ -7,7 +7,7 @@
 import { config } from "../../package.json";
 import { getString, getLocaleID } from "../utils/locale";
 import { getPref } from "../utils/prefs";
-import { log, errMsg } from "../utils/log";
+import { log, errMsg, errDetail } from "../utils/log";
 import * as engine from "./sync/engine";
 import { pushAnnotations } from "./sync/push";
 import { pullEpubAll, pushEpubAll, resolveEpubTargets } from "./sync/epubDocs";
@@ -139,13 +139,7 @@ export async function runSyncNow(): Promise<void> {
     });
     pw.startCloseTimer(5000);
   } catch (e) {
-    log("runSyncNow error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runSyncNow", e);
   }
 }
 
@@ -172,13 +166,7 @@ export async function runForcePull(): Promise<void> {
     });
     pw.startCloseTimer(5000);
   } catch (e) {
-    log("runForcePull error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runForcePull", e);
   }
 }
 
@@ -198,13 +186,7 @@ export async function runPush(): Promise<void> {
     });
     pw.startCloseTimer(6000);
   } catch (e) {
-    log("runPush error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runPush", e);
   }
 }
 
@@ -219,13 +201,7 @@ export async function runClearPulled(): Promise<void> {
     });
     pw.startCloseTimer(5000);
   } catch (e) {
-    log("runClearPulled error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runClearPulled", e);
   }
 }
 
@@ -254,13 +230,7 @@ export async function runImportUntracked(): Promise<void> {
     }
     scanPw.close();
   } catch (e) {
-    log("runImportUntracked scan error:", e);
-    scanPw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    scanPw.startCloseTimer(8000);
+    failProgress(scanPw, "runImportUntracked scan", e);
     return;
   }
 
@@ -284,13 +254,7 @@ export async function runImportUntracked(): Promise<void> {
     pw.startCloseTimer(5000);
     refreshStatusDots();
   } catch (e) {
-    log("runImportUntracked import error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runImportUntracked import", e);
   }
 }
 
@@ -369,6 +333,72 @@ function blockedBySafeMode(): boolean {
   if (!engine.isSafeMode()) return false;
   showNotice(getString("safe-mode-blocked"), "fail", 5000);
   return true;
+}
+
+/**
+ * Show the full, untruncated error text in a resizable dialog with a Copy
+ * button. Zotero's native progress popup truncates long lines via XUL
+ * `crop`, which CSS cannot override, so the short popup line alone can show
+ * "…without any details" — this dialog is the reliable place to read (and
+ * copy) the actual error.
+ */
+function showErrorDetails(headline: string, detail: string): void {
+  const dialog = new ztoolkit.Dialog(2, 1)
+    .addCell(0, 0, {
+      tag: "div",
+      properties: { textContent: headline },
+      styles: { margin: "8px", fontWeight: "600", maxWidth: "520px" },
+    })
+    .addCell(1, 0, {
+      tag: "textarea",
+      namespace: "html",
+      attributes: { readonly: "readonly", rows: "10" },
+      properties: { value: detail },
+      styles: {
+        display: "block",
+        margin: "8px",
+        width: "500px",
+        boxSizing: "border-box",
+        fontFamily: "monospace",
+        fontSize: "12px",
+        whiteSpace: "pre-wrap",
+      },
+    })
+    .addButton(getString("error-copy"), "copy")
+    .addButton(getString("error-close"), "close")
+    .open(getString("error-dialog-title"), {
+      centerscreen: true,
+      resizable: true,
+      fitContent: true,
+    });
+
+  const data = dialog.dialogData as {
+    _lastButtonId?: string;
+    unloadLock?: { promise: Promise<void> };
+    [key: string]: unknown;
+  };
+  data.unloadLock?.promise.then(() => {
+    if (data._lastButtonId === "copy") {
+      try {
+        Zotero.Utilities.Internal.copyTextToClipboard(detail);
+      } catch (e) {
+        log("showErrorDetails: copy failed:", errMsg(e));
+      }
+    }
+  });
+}
+
+/** Fail a progress popup and pop up the full error in a copyable dialog. */
+function failProgress(
+  pw: ReturnType<typeof newProgress>,
+  context: string,
+  e: unknown,
+): void {
+  log(`${context} error:`, e);
+  const text = getString("sync-error", { args: { error: errMsg(e) } });
+  pw.changeLine({ type: "fail", progress: 100, text });
+  pw.startCloseTimer(8000);
+  showErrorDetails(text, errDetail(e));
 }
 
 const PROGRESS_STYLE_ID = `${ID}-progress-style`;
@@ -479,13 +509,7 @@ export async function runOverwriteFromZotero(
     });
     pw.startCloseTimer(5000);
   } catch (e) {
-    log("runOverwriteFromZotero error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runOverwriteFromZotero", e);
   }
 }
 
@@ -523,13 +547,7 @@ export async function runOverwriteFromRemarkable(
     });
     pw.startCloseTimer(5000);
   } catch (e) {
-    log("runOverwriteFromRemarkable error:", e);
-    pw.changeLine({
-      type: "fail",
-      progress: 100,
-      text: getString("sync-error", { args: { error: errMsg(e) } }),
-    });
-    pw.startCloseTimer(8000);
+    failProgress(pw, "runOverwriteFromRemarkable", e);
   }
 }
 
