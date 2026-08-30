@@ -5,6 +5,8 @@
 // eu.tectonic.remarkable.com. Route every request through Zotero.HTTP, which
 // uses the privileged XMLHttpRequest stack (proxies, certs, no CORS).
 
+import { log } from "./log";
+
 let ensured = false;
 
 // Abort a single reMarkable HTTP request after this long (per request, not per
@@ -112,12 +114,52 @@ async function zoteroFetch(
   if (body !== undefined) options.body = body;
   try {
     const xhr = await Zotero.HTTP.request(method, url, options);
+    logIfError(method, url, xhr);
     return responseFromXhr(xhr, url);
   } catch (e) {
     const xmlhttp = (e as { xmlhttp?: XMLHttpRequest }).xmlhttp;
-    if (xmlhttp && xmlhttp.status > 0) return responseFromXhr(xmlhttp, url);
+    if (xmlhttp && xmlhttp.status > 0) {
+      logIfError(method, url, xmlhttp);
+      return responseFromXhr(xmlhttp, url);
+    }
     throw rewriteFetchError(e, url);
   }
+}
+
+/**
+ * The exception rmapi-js throws for a non-2xx response only carries the
+ * status/statusText/body-derived message — never the request method, the
+ * response headers, or a body preview. Log all of that ourselves so Help →
+ * Debug Output Logging has the full picture even when the caller's error
+ * object is thin (e.g. an empty body on a 401/403 reads as a blank error).
+ */
+function logIfError(method: string, url: string, xhr: XMLHttpRequest): void {
+  if (xhr.status >= 200 && xhr.status < 300) return;
+  // Zotero.HTTP.request with successCodes:false resolves rather than rejects
+  // even when no HTTP response was ever received (DNS failure, connection
+  // refused, TLS error) — that shows up as status 0, not as a thrown
+  // exception. Flag it plainly: this is a connectivity/firewall problem, not
+  // an application-level error from the reMarkable API.
+  if (xhr.status === 0) {
+    log(
+      `zoteroFetch: ${method} ${url} -> status 0 (no HTTP response received` +
+        " — DNS failure, connection refused, TLS error, or blocked by a" +
+        " firewall/proxy, not a reMarkable API error)",
+    );
+    return;
+  }
+  let bodyPreview = "";
+  try {
+    bodyPreview = xhrToArrayBuffer(xhr).byteLength
+      ? new TextDecoder().decode(xhrToArrayBuffer(xhr)).slice(0, 500)
+      : "(empty body)";
+  } catch {
+    bodyPreview = "(unreadable body)";
+  }
+  log(
+    `zoteroFetch: ${method} ${url} -> ${xhr.status} ${xhr.statusText || ""}`.trim(),
+    `body: ${bodyPreview}`,
+  );
 }
 
 function responseFromXhr(xhr: XMLHttpRequest, url: string): HttpResponse {

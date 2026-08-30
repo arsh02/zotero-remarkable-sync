@@ -127,10 +127,13 @@ on its own.
 
 ## Development
 
-On **macOS Apple Silicon (M1/M2/M3)**, run the prerequisite script first. It
+On **macOS Apple Silicon (M1+)**, run the prerequisite script first. It
 checks each build tool and installs anything missing, one package at a time
 (Xcode Command Line Tools, Homebrew, git, Node ≥ 18 arm64, npm, then this
-repo's `npm install`):
+repo's `npm install`). It also warns — without failing the build — if
+`Zotero.app` is missing or if the reMarkable cloud hosts used at runtime
+(`my.remarkable.com` for Connect, `eu.tectonic.remarkable.com` for Sync)
+are unreachable. Google Chrome is not required.
 
 ```bash
 bash scripts/macos-m1-prereqs.sh           # toolchain + npm packages

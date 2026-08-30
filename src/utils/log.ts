@@ -66,6 +66,26 @@ export function errDetail(e: unknown): string {
   const ctor = a?.constructor?.name;
   if (ctor && ctor !== "Object" && ctor !== "Error")
     lines.push(`type: ${ctor}`);
+  // rmapi-js's ResponseError (and our own HTTP wrapper) carry the HTTP
+  // status as plain instance properties, not part of `.message` — surface
+  // them explicitly, or a 401/403/5xx response with an empty body reads as
+  // a seemingly blank error.
+  if (typeof a?.status === "number" && Number.isFinite(a.status)) {
+    // status 0 is not "no status" — it is Gecko's signal for a connection
+    // that never got an HTTP response at all (DNS failure, connection
+    // refused, TLS error), which is a real and important finding here.
+    if (a.status === 0) {
+      lines.push(
+        "http status: 0 (no HTTP response was ever received — DNS failure," +
+          " connection refused, TLS error, or a firewall/proxy blocking the" +
+          " host; not an error from the reMarkable API itself)",
+      );
+    } else {
+      lines.push(
+        `http status: ${a.status}${a.statusText ? ` ${a.statusText}` : ""}`,
+      );
+    }
+  }
   lines.push(errMsg(e));
   if (typeof a?.stack === "string" && a.stack) {
     const frames = a.stack.split("\n").slice(0, 6).join("\n");
