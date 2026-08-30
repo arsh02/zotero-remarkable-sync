@@ -4,6 +4,7 @@
 
 import { register, remarkable, GenerationError } from "rmapi-js";
 import type { Entry, RemarkableApi, SimpleEntry, Tag } from "rmapi-js";
+import { log, errDetail } from "../../utils/log";
 import { getPref, setPref, clearPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
 
@@ -36,9 +37,20 @@ function deviceDesc(): "desktop-windows" | "desktop-macos" | "desktop-linux" {
 
 export async function connect(code: string): Promise<void> {
   ensureNetworkGlobals();
-  const token = await register(code.trim(), { deviceDesc: deviceDesc() });
-  setPref("deviceToken", token);
-  cachedApi = null;
+  const cleaned = code.replace(/\s+/g, "");
+  if (cleaned.length !== 8) {
+    throw new Error(
+      `One-time code must be exactly 8 characters (got ${cleaned.length}). Copy a fresh code from ${CONNECT_URL}.`,
+    );
+  }
+  try {
+    const token = await register(cleaned, { deviceDesc: deviceDesc() });
+    setPref("deviceToken", token);
+    cachedApi = null;
+  } catch (e) {
+    log("connect failed:", errDetail(e));
+    throw e;
+  }
 }
 
 export function disconnect(): void {

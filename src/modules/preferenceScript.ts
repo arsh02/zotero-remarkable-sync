@@ -1,7 +1,7 @@
 import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 import { getPref } from "../utils/prefs";
-import { log, errMsg } from "../utils/log";
+import { log, errMsg, errDetail } from "../utils/log";
 import * as client from "./remarkable/client";
 import * as scheduler from "./scheduler";
 
@@ -72,7 +72,7 @@ function bindPrefEvents() {
       if (input) input.value = "";
       updateConnectionStatus();
     } catch (e) {
-      log("connect failed:", e);
+      log("connect failed:", errDetail(e));
       setStatus(
         getString("pref-connection-status-error", {
           args: { error: errMsg(e) },

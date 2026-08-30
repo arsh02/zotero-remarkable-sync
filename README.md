@@ -189,6 +189,14 @@ device token is stored in Zotero preferences.
 (`chrome://…` messages in Zotero's log are internal Mozilla UI paths, not a
 request for Google Chrome.)
 
+If **Connect** fails with a one-time code, get a **fresh** 8-letter code
+from <https://my.remarkable.com/device/desktop/connect> (each code is
+single-use and expires in about a minute). Builds from `v0.3.9-chrome-xhr`
+send that registration POST as JSON through a chrome-window XHR; older
+`Zotero.HTTP` builds could send it as form-urlencoded, which the auth
+host rejects. The preferences status line now includes the HTTP status
+when registration fails.
+
 If **Connect** succeeds but **Sync now** fails with
 `NetworkError when attempting to fetch resource` against
 `eu.tectonic.remarkable.com`, install a build that routes reMarkable traffic

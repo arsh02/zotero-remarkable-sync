@@ -43,15 +43,25 @@ export function errMsg(e: unknown): string {
   // message/stack are non-enumerable (so JSON.stringify gives "{}"). Read the
   // common properties defensively.
   const a = e as any;
-  if (typeof a.message === "string" && a.message) return a.message;
-  if (typeof a.name === "string" && a.name) return a.name;
-  try {
-    const s = a.toString?.();
-    if (s && s !== "[object Object]") return s;
-  } catch {
-    /* ignore */
+  let msg = "";
+  if (typeof a.message === "string" && a.message) msg = a.message;
+  else if (typeof a.name === "string" && a.name) msg = a.name;
+  else {
+    try {
+      const s = a.toString?.();
+      if (s && s !== "[object Object]") msg = s;
+    } catch {
+      /* ignore */
+    }
+    if (!msg) msg = safeStringify(e);
   }
-  return safeStringify(e);
+  if (typeof a.status === "number" && Number.isFinite(a.status)) {
+    if (a.status === 0) {
+      return `${msg} (HTTP 0: no response — network/firewall, not a bad code)`;
+    }
+    return `${msg} (HTTP ${a.status}${a.statusText ? ` ${a.statusText}` : ""})`;
+  }
+  return msg;
 }
 
 /**

@@ -1,9 +1,10 @@
 // rmapi-js relies on ambient `fetch` / `crypto.subtle` / `TextEncoder`.
-// Zotero's plugin sandbox `fetch` (and even the chrome-window copy) is
-// CORS-restricted on Zotero 9 and fails with
-// "NetworkError when attempting to fetch resource" against
-// eu.tectonic.remarkable.com. Route every request through Zotero.HTTP, which
-// uses the privileged XMLHttpRequest stack (proxies, certs, no CORS).
+// Zotero's plugin sandbox `fetch` is CORS-restricted on Zotero 9. Route
+// requests through an XMLHttpRequest constructed on the chrome main window
+// (privileged principal, no CORS). JSON POSTs also need an explicit
+// Content-Type: application/json — Zotero.HTTP.request otherwise sends
+// them as form-urlencoded, which makes device registration fail. Fall back
+// to Zotero.HTTP.request if the chrome XHR returns status 0.
 
 import { log } from "./log";
 
@@ -95,25 +96,27 @@ async function zoteroFetch(
   const method = String(init.method || "GET").toUpperCase();
   const headers = headersToObject(init.headers);
   const body = await normalizeBody(init.body);
-  if (typeof Zotero.HTTP?.request !== "function") {
-    throw new Error(
-      "reMarkable Sync: Zotero.HTTP.request is unavailable; cannot reach the cloud",
-    );
-  }
+  // rmapi-js POSTs JSON with no Content-Type. Native fetch then sends
+  // text/plain; Zotero.HTTP.request defaults to form-urlencoded and the
+  // auth endpoint rejects the body — Connect looks like a bad one-time
+  // code. Always mark JSON strings as application/json.
+  applyJsonContentType(headers, body);
   if (Zotero.HTTP.browserIsOffline?.()) {
     throw new Error(`Zotero is offline; cannot reach reMarkable (${url})`);
   }
-  const options: Parameters<typeof Zotero.HTTP.request>[2] = {
-    headers,
-    timeout: FETCH_TIMEOUT_MS,
-    successCodes: false,
-    errorDelayMax: 0,
-    noCache: true,
-    responseType: "arraybuffer",
-  };
-  if (body !== undefined) options.body = body;
   try {
-    const xhr = await Zotero.HTTP.request(method, url, options);
+    let xhr = await chromeWindowRequest(method, url, headers, body);
+    if (xhr.status === 0) {
+      log(
+        `zoteroFetch: chrome XHR status 0 for ${method} ${url}; trying Zotero.HTTP`,
+      );
+      xhr = await zoteroHttpRequest(method, url, headers, body);
+    }
+    if (xhr.status === 0) {
+      throw new Error(
+        `No HTTP response from ${url} (status 0). DNS, TLS, firewall, or proxy blocked the host — not a bad one-time code.`,
+      );
+    }
     logIfError(method, url, xhr);
     return responseFromXhr(xhr, url);
   } catch (e) {
@@ -124,6 +127,87 @@ async function zoteroFetch(
     }
     throw rewriteFetchError(e, url);
   }
+}
+
+function applyJsonContentType(
+  headers: Record<string, string>,
+  body: string | Uint8Array | undefined,
+): void {
+  if (typeof body !== "string") return;
+  if (Object.keys(headers).some((k) => k.toLowerCase() === "content-type")) {
+    return;
+  }
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    headers["Content-Type"] = "application/json";
+  }
+}
+
+/**
+ * XHR constructed on Zotero's chrome window inherits that window's
+ * privileged principal, so it is not CORS-limited the way sandbox `fetch`
+ * is. This is the path that originally succeeded for device registration.
+ */
+function chromeWindowRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: string | Uint8Array | undefined,
+): Promise<XMLHttpRequest> {
+  const win = Zotero.getMainWindow() as any;
+  if (!win?.XMLHttpRequest) {
+    return Promise.reject(
+      new Error("reMarkable Sync: no chrome window XMLHttpRequest"),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new win.XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.timeout = FETCH_TIMEOUT_MS;
+    xhr.responseType = "arraybuffer";
+    for (const [key, value] of Object.entries(headers)) {
+      try {
+        xhr.setRequestHeader(key, value);
+      } catch (e) {
+        log(`zoteroFetch: setRequestHeader(${key}) failed:`, e);
+      }
+    }
+    xhr.onloadend = () => resolve(xhr);
+    xhr.ontimeout = () =>
+      reject(
+        new Error(
+          `reMarkable request timed out after ${FETCH_TIMEOUT_MS / 1000}s (${url})`,
+        ),
+      );
+    try {
+      xhr.send(body ?? null);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function zoteroHttpRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: string | Uint8Array | undefined,
+): Promise<XMLHttpRequest> {
+  if (typeof Zotero.HTTP?.request !== "function") {
+    throw new Error(
+      "reMarkable Sync: Zotero.HTTP.request is unavailable; cannot reach the cloud",
+    );
+  }
+  const options: Parameters<typeof Zotero.HTTP.request>[2] = {
+    headers,
+    timeout: FETCH_TIMEOUT_MS,
+    successCodes: false,
+    errorDelayMax: 0,
+    noCache: true,
+    responseType: "arraybuffer",
+  };
+  if (body !== undefined) options.body = body;
+  return Zotero.HTTP.request(method, url, options);
 }
 
 /**
@@ -255,7 +339,7 @@ function describeException(e: unknown): string {
 
   const xhr = a?.xmlhttp;
   if (xhr) {
-    if (typeof xhr.status === "number" && xhr.status) {
+    if (typeof xhr.status === "number" && Number.isFinite(xhr.status)) {
       bits.push(`http ${xhr.status} ${xhr.statusText || ""}`.trim());
     }
     const nsresult = xhr.channel?.status;
