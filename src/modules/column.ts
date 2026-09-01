@@ -29,16 +29,17 @@ function stateOf(item: Zotero.Item): SyncState {
   let dirty = false;
   for (const att of Zotero.Items.get(item.getAttachments())) {
     const kind = attachmentKind(att);
-    if (!kind || kind === "docx") continue; // docx's record lives on its companion
+    if (kind === "docx") continue; // record lives on the generated companion
     const rec = getRecordCached(att.key);
     if (!rec) continue;
+    // Leftover native-EPUB records from older builds are ignored.
+    if (rec.sourceKind === "native-epub") continue;
     hasRecord = true;
     lastPushed = Math.max(lastPushed, rec.lastPushed || 0);
 
-    if (kind !== "pdf") {
-      // EPUB: simpler "pushed set changed" check (no per-item ids/signatures
-      // to compare, since annotations are baked into re-uploaded content
-      // rather than patched in place — see epubDocs.ts).
+    if ((rec.kind ?? "pdf") !== "pdf") {
+      // DOCX companion: simpler "pushed set changed" check (annotations are
+      // baked into re-uploaded content rather than patched in place).
       const pulled = new Set(rec.annotationKeys ?? []);
       const pushed = new Set(rec.pushedKeys ?? []);
       for (const a of att.getAnnotations()) {

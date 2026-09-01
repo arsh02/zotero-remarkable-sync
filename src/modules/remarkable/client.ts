@@ -3,9 +3,31 @@
 // put* operations (which throw GenerationError on a stale root generation).
 
 import { register, remarkable, GenerationError } from "rmapi-js";
-import type { Entry, RemarkableApi, SimpleEntry } from "rmapi-js";
+import type { Entry, RemarkableApi, SimpleEntry, Tag } from "rmapi-js";
+import { log, errMsg, errDetail } from "../../utils/log";
 import { getPref, setPref, clearPref } from "../../utils/prefs";
-import { ensureNetworkGlobals } from "../../utils/globals";
+import {
+  ensureNetworkGlobals,
+  getLastRequestSummary,
+  probeSyncCertificate,
+  trustCertificateChain,
+  type CertProbeResult,
+} from "../../utils/globals";
+
+export { getLastRequestSummary };
+
+export type { CertProbeResult };
+
+/**
+ * Probe the reMarkable sync host's TLS certificate (no auth/sync side
+ * effects) so the preferences pane can show a user exactly what's wrong and
+ * offer to trust a corporate SSL-inspection proxy's CA, opt-in, before any
+ * real sync attempt hits the same failure blind.
+ */
+export const probeCertificate = probeSyncCertificate;
+
+/** Import a CA chain from a prior probeCertificate() result into Zotero's trust store. */
+export const trustCertificate = trustCertificateChain;
 
 export class NotConnectedError extends Error {
   constructor() {
@@ -17,18 +39,47 @@ export class NotConnectedError extends Error {
 let cachedApi: RemarkableApi | null = null;
 
 export function isConnected(): boolean {
-  return !!getPref("deviceToken");
+  return !!String(getPref("deviceToken") ?? "").trim();
 }
 
 /**
- * Exchange a one-time code (from my.remarkable.com/device/browser/connect) for a
- * long-lived device token and persist it.
+ * Exchange a one-time code (from my.remarkable.com/device/desktop/connect)
+ * for a long-lived device token and persist it. Open that page in Firefox —
+ * Google Chrome is not required. `deviceDesc` is an API label for this
+ * desktop app, not a request to launch Chrome.
  */
+export const CONNECT_URL = "https://my.remarkable.com/device/desktop/connect";
+
+function deviceDesc(): "desktop-windows" | "desktop-macos" | "desktop-linux" {
+  if (Zotero.isMac) return "desktop-macos";
+  if (Zotero.isWin) return "desktop-windows";
+  return "desktop-linux";
+}
+
 export async function connect(code: string): Promise<void> {
   ensureNetworkGlobals();
-  const token = await register(code.trim(), { deviceDesc: "browser-chrome" });
-  setPref("deviceToken", token);
-  cachedApi = null;
+  const cleaned = code.replace(/\s+/g, "");
+  if (cleaned.length !== 8) {
+    throw new Error(
+      `One-time code must be exactly 8 characters (got ${cleaned.length}). Copy a fresh code from ${CONNECT_URL}.`,
+    );
+  }
+  try {
+    const token = (
+      await register(cleaned, { deviceDesc: deviceDesc() })
+    ).trim();
+    if (token.length < 16) {
+      throw new Error(
+        `Registration returned a token that is too short (${token.length} chars). The HTTP body may have been empty. Try a fresh one-time code from ${CONNECT_URL}. Last request: ${getLastRequestSummary()}`,
+      );
+    }
+    log(`connect: stored device token (${token.length} chars)`);
+    setPref("deviceToken", token);
+    cachedApi = null;
+  } catch (e) {
+    log("connect failed:", errDetail(e));
+    throw e;
+  }
 }
 
 export function disconnect(): void {
@@ -40,9 +91,16 @@ export function disconnect(): void {
 export async function getApi(): Promise<RemarkableApi> {
   if (cachedApi) return cachedApi;
   ensureNetworkGlobals();
-  const token = getPref("deviceToken");
+  const token = String(getPref("deviceToken") ?? "").trim();
   if (!token) throw new NotConnectedError();
-  cachedApi = await remarkable(token);
+  try {
+    cachedApi = await remarkable(token);
+  } catch (e) {
+    log("getApi failed:", errDetail(e), `deviceTokenChars=${token.length}`);
+    throw new Error(
+      `${errMsg(e)} — session token request rejected (stored device token is ${token.length} chars). Disconnect and Connect again with a fresh one-time code from ${CONNECT_URL}. Last request: ${getLastRequestSummary()}`,
+    );
+  }
   return cachedApi;
 }
 
@@ -124,8 +182,8 @@ export async function uploadPdf(
 
 /**
  * Upload an EPUB into a folder, returning the new document's id and hash.
- * Used for native Zotero EPUB attachments, DOCX-derived companion EPUBs, and
- * EPUBs generated from Zotero notes.
+ * Used for DOCX-derived companion EPUBs and EPUBs generated from Zotero notes.
+ * Native Zotero EPUB attachments are not synced.
  */
 export async function uploadEpub(
   api: RemarkableApi,
@@ -154,4 +212,19 @@ export async function deleteDoc(
   hash: string,
 ): Promise<void> {
   await withGenerationRetry(() => api.delete(hash));
+}
+
+/**
+ * Replace a document's tag list. Returns the new document hash (content
+ * edits change the hash; the document id stays the same).
+ */
+export async function updateDocTags(
+  api: RemarkableApi,
+  hash: string,
+  tags: Tag[],
+): Promise<string> {
+  const result = await withGenerationRetry(() =>
+    api.updateDocument(hash, { tags }),
+  );
+  return result.hash;
 }

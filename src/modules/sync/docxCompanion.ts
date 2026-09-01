@@ -8,6 +8,7 @@ import { getPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
 import { log, errMsg } from "../../utils/log";
 import { sha256Hex } from "../../utils/hash";
+import { writeTempFile, removeTempFile } from "../../utils/tempFile";
 import { docxToChapters } from "../convert/docx";
 import { buildEpub } from "../epub/build";
 import {
@@ -24,14 +25,6 @@ function epubTitleFor(docxAtt: Zotero.Item): string {
   const base =
     parent?.getDisplayTitle() || docxAtt.attachmentFilename || "Document";
   return base.replace(/\.docx$/i, "").trim() || "Document";
-}
-
-async function writeTempFile(name: string, bytes: Uint8Array): Promise<string> {
-  const dir = Zotero.getTempDirectory().path;
-  const safeName = name.replace(/[\\/:*?"<>|]/g, "_");
-  const path = IO.PathUtils.join(dir, `rms-${Date.now()}-${safeName}`);
-  await IO.IOUtils.write(path, bytes);
-  return path;
 }
 
 /** Find an already-generated companion attachment without creating one. */
@@ -117,11 +110,7 @@ export async function ensureCompanion(
     );
     return created as Zotero.Item;
   } finally {
-    try {
-      await IO.IOUtils.remove(tempPath, { ignoreAbsent: true });
-    } catch {
-      /* best effort cleanup */
-    }
+    await removeTempFile(tempPath);
   }
 }
 

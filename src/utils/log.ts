@@ -43,13 +43,65 @@ export function errMsg(e: unknown): string {
   // message/stack are non-enumerable (so JSON.stringify gives "{}"). Read the
   // common properties defensively.
   const a = e as any;
-  if (typeof a.message === "string" && a.message) return a.message;
-  if (typeof a.name === "string" && a.name) return a.name;
-  try {
-    const s = a.toString?.();
-    if (s && s !== "[object Object]") return s;
-  } catch {
-    /* ignore */
+  let msg = "";
+  if (typeof a.message === "string" && a.message) msg = a.message;
+  else if (typeof a.name === "string" && a.name) msg = a.name;
+  else {
+    try {
+      const s = a.toString?.();
+      if (s && s !== "[object Object]") msg = s;
+    } catch {
+      /* ignore */
+    }
+    if (!msg) msg = safeStringify(e);
   }
-  return safeStringify(e);
+  if (typeof a.status === "number" && Number.isFinite(a.status)) {
+    if (a.status === 0) {
+      return `${msg} (HTTP 0: no response — network/firewall, not a bad code)`;
+    }
+    return `${msg} (HTTP ${a.status}${a.statusText ? ` ${a.statusText}` : ""})`;
+  }
+  return msg;
+}
+
+/**
+ * Multi-line diagnostic dump for a thrown value: type/name, message, and the
+ * first few stack frames. Meant for a copyable detail dialog, not the
+ * one-line progress popup (Zotero's native progress window truncates long
+ * lines with XUL `crop`, which no amount of CSS can override).
+ */
+export function errDetail(e: unknown): string {
+  const lines: string[] = [];
+  const a = e as any;
+  const ctor = a?.constructor?.name;
+  if (ctor && ctor !== "Object" && ctor !== "Error")
+    lines.push(`type: ${ctor}`);
+  // rmapi-js's ResponseError (and our own HTTP wrapper) carry the HTTP
+  // status as plain instance properties, not part of `.message` — surface
+  // them explicitly, or a 401/403/5xx response with an empty body reads as
+  // a seemingly blank error.
+  if (typeof a?.status === "number" && Number.isFinite(a.status)) {
+    // status 0 is not "no status" — it is Gecko's signal for a connection
+    // that never got an HTTP response at all (DNS failure, connection
+    // refused, TLS error), which is a real and important finding here.
+    if (a.status === 0) {
+      lines.push(
+        "http status: 0 (no HTTP response was ever received — DNS failure," +
+          " connection refused, TLS error, or a firewall/proxy blocking the" +
+          " host; not an error from the reMarkable API itself)",
+      );
+    } else {
+      lines.push(
+        `http status: ${a.status}${a.statusText ? ` ${a.statusText}` : ""}`,
+      );
+    }
+  }
+  lines.push(errMsg(e));
+  if (typeof a?.stack === "string" && a.stack) {
+    const frames = a.stack.split("\n").slice(0, 6).join("\n");
+    if (frames && frames !== lines[lines.length - 1]) {
+      lines.push("", frames);
+    }
+  }
+  return lines.join("\n");
 }

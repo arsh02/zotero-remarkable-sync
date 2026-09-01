@@ -1,5 +1,7 @@
-// Orchestrates PDF push/pull and add/remove-from-sync. EPUB/DOCX/notes live
-// in epubDocs.ts, docxCompanion.ts, and notes.ts.
+// Orchestrates PDF push/pull and add/remove-from-sync. DOCX companions and
+// notes live in epubDocs.ts / docxCompanion.ts / notes.ts (reMarkable has no
+// native .docx path; those are uploaded as generated EPUBs). Native Zotero
+// EPUB attachments are not synced.
 
 import { getPref } from "../../utils/prefs";
 import { ensureNetworkGlobals } from "../../utils/globals";
@@ -19,6 +21,14 @@ import {
 } from "./state";
 import { applyAnnotations } from "./annotations";
 import { findCompanion } from "./docxCompanion";
+import {
+  identityTag,
+  fingerprintTag,
+  findByIdentity,
+  hasTag,
+  reconcileDuplicates,
+  deleteSuperseded,
+} from "./dedupe";
 
 const IO = globalThis as any;
 
@@ -49,15 +59,6 @@ export function isSafeMode(): boolean {
   return getPref("safeMode") !== false;
 }
 
-/** Is this attachment's EPUB-ness detectable via Zotero's own API, or by content type? */
-export function isEpubAttachment(att: Zotero.Item): boolean {
-  const anyAtt = att as any;
-  if (typeof anyAtt.isEPUBAttachment === "function") {
-    return !!anyAtt.isEPUBAttachment();
-  }
-  return anyAtt.attachmentContentType === "application/epub+zip";
-}
-
 const DOCX_CONTENT_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
@@ -68,12 +69,11 @@ export function isDocxAttachment(att: Zotero.Item): boolean {
   return /\.docx$/i.test(anyAtt.attachmentFilename ?? "");
 }
 
-/** What kind of syncable document this attachment is, or null if none. */
-export type AttachmentKind = "pdf" | "epub" | "docx";
+/** What kind of user-facing syncable document this attachment is, or null. */
+export type AttachmentKind = "pdf" | "docx";
 
 export function attachmentKind(att: Zotero.Item): AttachmentKind | null {
   if (att.isPDFAttachment()) return "pdf";
-  if (isEpubAttachment(att)) return "epub";
   if (isDocxAttachment(att)) return "docx";
   return null;
 }
@@ -91,7 +91,7 @@ export async function stopSync(att: Zotero.Item): Promise<void> {
     // Only drop the tag if no *other* syncable attachment of this item is
     // still synced.
     const others = Zotero.Items.get(parent.getAttachments()).filter(
-      (a) => attachmentKind(a) && a.key !== att.key,
+      (a) => a.key !== att.key,
     );
     const anyOther = (
       await Promise.all(others.map((a) => getRecord(a.key)))
@@ -150,17 +150,6 @@ export function pdfAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   return out;
 }
 
-/** Collect the native EPUB attachments of the given regular items. */
-export function epubAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
-  const out: Zotero.Item[] = [];
-  for (const item of items) {
-    for (const att of Zotero.Items.get(item.getAttachments())) {
-      if (isEpubAttachment(att)) out.push(att);
-    }
-  }
-  return out;
-}
-
 /** Collect the DOCX attachments of the given regular items. */
 export function docxAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   const out: Zotero.Item[] = [];
@@ -172,7 +161,7 @@ export function docxAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   return out;
 }
 
-/** Collect every PDF/EPUB/DOCX attachment of the given regular items. */
+/** Collect every PDF/DOCX attachment of the given regular items. */
 export function syncableAttachmentsOf(items: Zotero.Item[]): Zotero.Item[] {
   const out: Zotero.Item[] = [];
   for (const item of items) {
@@ -228,9 +217,11 @@ export async function pushAll(
   const folderId = await client.ensureFolder(api, folder);
   log(`pushAll: folderId="${folderId}"`);
 
-  // The device documents that currently exist — so we can detect docs deleted on
-  // the reMarkable and stop syncing them (rather than re-uploading).
-  const deviceDocIds = new Set((await api.listItems()).map((e) => e.id));
+  // Fresh listing so we can detect docs deleted on the device *and* documents
+  // another machine already pushed (via zrs-id- / zrs-fp- tags). Collapse any
+  // identity-tag duplicates left by a first-push race before we look them up.
+  const remote = await reconcileDuplicates(api, await api.listItems(true));
+  const deviceDocIds = new Set(remote.map((e) => e.id));
 
   let done = 0;
   for (const att of attachments) {
@@ -247,8 +238,45 @@ export async function pushAll(
       }
       const bytes: Uint8Array = await IO.IOUtils.read(path);
       const fileHash = await sha256Hex(bytes);
+      const idTag = identityTag(att.libraryID, att.key);
+      const fpTag = fingerprintTag(fileHash);
 
       const existing = await getRecord(att.key);
+      const cloudMatch = findByIdentity(remote, idTag);
+
+      // Another machine (or a previous run on this one) already pushed this
+      // exact content. Adopt the cloud document instead of uploading a copy.
+      if (!opts.force && cloudMatch && hasTag(cloudMatch, fpTag)) {
+        const alreadyTracked =
+          !!existing &&
+          existing.docId === cloudMatch.id &&
+          existing.fileHash === fileHash;
+        if (!alreadyTracked) {
+          const sameDoc = existing?.docId === cloudMatch.id;
+          await setRecord(att.key, {
+            docId: cloudMatch.id,
+            docHash: cloudMatch.hash,
+            fileHash,
+            kind: "pdf",
+            visibleName: name,
+            libraryID: att.libraryID,
+            lastPushed: sameDoc && existing ? existing.lastPushed : Date.now(),
+            lastPulledVersion: sameDoc
+              ? existing?.lastPulledVersion
+              : undefined,
+            annotationKeys: sameDoc ? existing?.annotationKeys : [],
+            pushedKeys: sameDoc ? existing?.pushedKeys : [],
+            pushedItems: sameDoc ? existing?.pushedItems : [],
+          });
+          log(`pushAll: adopt "${name}" from cloud (${cloudMatch.id})`);
+        } else {
+          log(`pushAll: skip "${name}" (unchanged)`);
+        }
+        summary.skipped++;
+        done++;
+        continue;
+      }
+
       const missingOnDevice = !!existing && !deviceDocIds.has(existing.docId);
       if (
         !opts.force &&
@@ -261,10 +289,12 @@ export async function pushAll(
         done++;
         continue;
       }
-      // Deleted on the reMarkable: respect that and stop syncing it in Zotero,
-      // rather than re-uploading. An explicit forced push (per-item "Overwrite
-      // device from Zotero") still re-uploads a fresh copy.
-      if (missingOnDevice && !opts.force) {
+      // Deleted on the reMarkable with no other-machine copy to adopt: respect
+      // that and stop syncing it in Zotero, rather than re-uploading. An
+      // explicit forced push still re-uploads a fresh copy. A stale
+      // identity-tagged copy (fingerprint mismatch) is *not* a deletion — we
+      // fall through and replace it.
+      if (missingOnDevice && !cloudMatch && !opts.force) {
         log(`pushAll: "${name}" was deleted on reMarkable — stopping sync`);
         await stopSync(att);
         summary.stopped++;
@@ -272,11 +302,17 @@ export async function pushAll(
         continue;
       }
       if (missingOnDevice) {
-        log(`pushAll: "${name}" missing on device — re-uploading (forced)`);
+        log(`pushAll: "${name}" missing on device — re-uploading`);
       }
 
       log(`pushAll: uploading "${name}" (${bytes.length} bytes) …`);
-      const entry = await client.uploadPdf(api, name, bytes, folderId);
+      const entry = await client.uploadPdf(api, name, bytes, folderId, [
+        idTag,
+        fpTag,
+      ]);
+      if (cloudMatch && cloudMatch.id !== entry.id) {
+        await deleteSuperseded(api, cloudMatch, `pushAll "${name}"`);
+      }
       // When re-uploading a fresh document, reset annotation tracking so every
       // Zotero annotation gets re-pushed onto the fresh document.
       const record: SyncRecord = {
@@ -337,9 +373,8 @@ export async function pullAll(
   };
 
   const records = await allRecords();
-  // This function pulls PDF page-geometry-based annotations only — EPUB
-  // records (native EPUBs and docx companions) are pulled via
-  // epubDocs.pullEpubAll, which understands CFI positions instead.
+  // This function pulls PDF page-geometry-based annotations only — DOCX
+  // companion EPUBs are pulled via epubDocs.pullEpubAll (CFI positions).
   const keys = Object.keys(records).filter(
     (k) =>
       (records[k].kind ?? "pdf") === "pdf" &&
@@ -538,10 +573,7 @@ export async function removeFromSync(items: Zotero.Item[]): Promise<void> {
     }
     for (const att of Zotero.Items.get(item.getAttachments())) {
       const kind = attachmentKind(att);
-      if (!kind) continue;
-      // A DOCX's actual synced document is its generated companion EPUB, if
-      // one exists — clean that record (and the docx->companion mapping) up
-      // too, rather than the (never-synced) .docx attachment's own key.
+      // A DOCX's actual synced document is its generated companion EPUB.
       const target = kind === "docx" ? await findCompanion(att) : att;
       if (target) {
         const record = await getRecord(target.key);
@@ -554,6 +586,20 @@ export async function removeFromSync(items: Zotero.Item[]): Promise<void> {
           }
         }
         await removeRecord(target.key);
+      }
+      // Also drop leftover records on this attachment itself (e.g. a native
+      // EPUB that was synced by an older build).
+      if (!target || target.key !== att.key) {
+        const own = await getRecord(att.key);
+        if (own && api) {
+          try {
+            const entry = await client.findById(api, own.docId);
+            if (entry) await client.deleteDoc(api, entry.hash);
+          } catch {
+            /* best effort */
+          }
+        }
+        await removeRecord(att.key);
       }
       if (kind === "docx") await removeCompanionKey(att.key);
     }

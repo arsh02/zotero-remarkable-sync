@@ -1,10 +1,9 @@
-// Open an existing EPUB (a native Zotero EPUB attachment, or one we generated
-// ourselves) well enough to: walk its spine in order, get each chapter's
-// parsed XHTML DOM (for CFI resolution / highlight baking), and re-serialize
-// an edited chapter back into the same zip for re-upload. Intentionally only
-// understands the common, spec-typical EPUB2/3 shapes — falls back to
-// "give up on this chapter" rather than guessing on anything unusual, since
-// callers already have a text-search fallback for annotation matching.
+// Open a generated companion EPUB well enough to: walk its spine in order, get
+// each chapter's parsed XHTML DOM (for CFI resolution / highlight baking), and
+// re-serialize an edited chapter back into the same zip for re-upload.
+// Intentionally only understands the common, spec-typical EPUB2/3 shapes —
+// falls back to "give up on this chapter" rather than guessing on anything
+// unusual, since callers already have a text-search fallback for matching.
 
 import JSZip from "jszip";
 import { getDOMParser, getXMLSerializer } from "../../utils/globals";
