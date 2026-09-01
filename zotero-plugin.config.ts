@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
@@ -41,14 +41,19 @@ export default defineConfig({
     ],
     hooks: {
       "build:done": (ctx) => {
-        const xpiName = `${ctx.xpiName}.xpi`;
-        const src = join(ctx.dist, xpiName);
-        // Dev/serve builds skip packing, so there is nothing to copy.
-        if (!existsSync(src)) return;
+        // Scaffold writes the packed .xpi under dist (.scaffold/build). Copy
+        // every .xpi found there into ./build so `npm run build` and the
+        // macOS prereqs script both leave an installable file in the same
+        // place (Settings → Add-ons → Install Add-on From File…).
+        if (!existsSync(ctx.dist)) return;
+        const names = readdirSync(ctx.dist).filter((f) => f.endsWith(".xpi"));
+        if (!names.length) return;
         mkdirSync("build", { recursive: true });
-        const dest = join("build", xpiName);
-        copyFileSync(src, dest);
-        ctx.logger.info(`Copied XPI to ${dest}`);
+        for (const name of names) {
+          const dest = join("build", name);
+          copyFileSync(join(ctx.dist, name), dest);
+          ctx.logger.info(`Copied XPI to ${dest}`);
+        }
       },
     },
   },

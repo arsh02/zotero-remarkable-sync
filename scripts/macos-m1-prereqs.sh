@@ -226,16 +226,18 @@ ensure_npm_deps() {
 
 maybe_build() {
   [[ "$DO_BUILD" -eq 1 ]] || return 0
-  begin "npm run build (.xpi)"
+  begin "npm run build (.xpi → build/)"
   prefer_homebrew_path
   npm run build
-  local xpi
-  xpi="$(ls -1t "${ROOT}/.scaffold/build/"*.xpi 2>/dev/null | head -1 || true)"
-  [[ -n "$xpi" && -f "$xpi" ]] || die "Build finished but no .xpi appeared under ${ROOT}/.scaffold/build/."
   mkdir -p "${ROOT}/build"
-  cp -f "$xpi" "${ROOT}/build/"
-  ok "$xpi ($(du -h "$xpi" | awk '{print $1}'))"
-  ok "copied to ${ROOT}/build/$(basename "$xpi")"
+  local src dest
+  src="$(ls -1t "${ROOT}/.scaffold/build/"*.xpi 2>/dev/null | head -1 || true)"
+  [[ -n "$src" && -f "$src" ]] || die "Build finished but no .xpi appeared under ${ROOT}/.scaffold/build/."
+  dest="${ROOT}/build/$(basename "$src")"
+  cp -f "$src" "$dest"
+  [[ -f "$dest" ]] || die "Failed to copy $(basename "$src") into ${ROOT}/build/."
+  ok "$src ($(du -h "$src" | awk '{print $1}'))"
+  ok "install from ${dest}"
 }
 
 # curl ships with macOS. Only brew-install it if PATH is somehow stripped.
