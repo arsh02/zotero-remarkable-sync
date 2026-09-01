@@ -1,9 +1,15 @@
 import { config } from "../../package.json";
 import { getString } from "../utils/locale";
-import { getPref } from "../utils/prefs";
 import { log, errMsg, errDetail } from "../utils/log";
 import * as client from "./remarkable/client";
 import * as scheduler from "./scheduler";
+import { showErrorDetails } from "./ui";
+
+// Populated by "Check network certificate" and consumed by "Trust this
+// network's certificate" — deliberately in-memory only (not persisted), so
+// a stale chain from a previous profile/session can never be trusted by
+// accident; each Trust click acts strictly on the most recent Check.
+let lastCertChainForTrust: string[] | null = null;
 
 /**
  * Register the plugin's preference pane so it appears in Zotero Settings.
@@ -45,8 +51,15 @@ function setStatus(text: string) {
   status.textContent = text;
 }
 
+function setDisabled(id: string, disabled: boolean) {
+  const node = el(id);
+  if (!node) return;
+  if (disabled) node.setAttribute("disabled", "true");
+  else node.removeAttribute("disabled");
+}
+
 export function updateConnectionStatus() {
-  const connected = !!getPref("deviceToken");
+  const connected = client.isConnected();
   setStatus(
     getString(
       connected
@@ -54,15 +67,23 @@ export function updateConnectionStatus() {
         : "pref-connection-status-disconnected",
     ),
   );
+  setDisabled("disconnect", !connected);
 }
 
 function bindPrefEvents() {
+  // registerPrefsScripts runs on every pane onload. If the same DOM is
+  // reused, stacking another set of listeners makes Connect fire twice
+  // with the same one-time code (second request gets an empty 2xx body).
+  const connectBtn = el("connect");
+  if (!connectBtn || connectBtn.getAttribute("data-rms-bound") === "1") return;
+  connectBtn.setAttribute("data-rms-bound", "1");
+
   el("connect-link")?.addEventListener("click", (ev) => {
     ev.preventDefault();
     Zotero.launchURL(client.CONNECT_URL);
   });
 
-  el("connect")?.addEventListener("command", async () => {
+  connectBtn.addEventListener("command", async () => {
     const input = el("code") as HTMLInputElement | null;
     const code = input?.value?.trim();
     if (!code) return;
@@ -73,11 +94,56 @@ function bindPrefEvents() {
       updateConnectionStatus();
     } catch (e) {
       log("connect failed:", errDetail(e));
-      setStatus(
-        getString("pref-connection-status-error", {
-          args: { error: errMsg(e) },
-        }),
+      const text = getString("pref-connection-status-error", {
+        args: { error: errMsg(e) },
+      });
+      setStatus(text);
+      showErrorDetails(text, errDetail(e));
+    }
+  });
+
+  el("disconnect")?.addEventListener("command", () => {
+    client.disconnect();
+    updateConnectionStatus();
+  });
+
+  function setCertStatus(text: string) {
+    const status = el("cert-status");
+    if (status) status.textContent = text;
+  }
+
+  el("check-cert")?.addEventListener("command", async () => {
+    lastCertChainForTrust = null;
+    setDisabled("trust-cert", true);
+    setDisabled("check-cert", true);
+    setCertStatus("Checking…");
+    try {
+      const result = await client.probeCertificate();
+      setCertStatus(result.detail);
+      if (result.chainForTrust) {
+        lastCertChainForTrust = result.chainForTrust;
+        setDisabled("trust-cert", false);
+      }
+    } catch (e) {
+      log("check-cert failed:", errDetail(e));
+      setCertStatus(`Check failed: ${errMsg(e)}`);
+    } finally {
+      setDisabled("check-cert", false);
+    }
+  });
+
+  el("trust-cert")?.addEventListener("command", () => {
+    if (!lastCertChainForTrust) {
+      setCertStatus(
+        "No pending certificate to trust — click \u201CCheck network certificate\u201D first.",
       );
+      return;
+    }
+    const result = client.trustCertificate(lastCertChainForTrust);
+    setCertStatus(result.detail);
+    if (result.ok) {
+      lastCertChainForTrust = null;
+      setDisabled("trust-cert", true);
     }
   });
 

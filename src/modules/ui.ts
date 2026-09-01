@@ -342,7 +342,7 @@ function blockedBySafeMode(): boolean {
  * "…without any details" — this dialog is the reliable place to read (and
  * copy) the actual error.
  */
-function showErrorDetails(headline: string, detail: string): void {
+export function showErrorDetails(headline: string, detail: string): void {
   const dialog = new ztoolkit.Dialog(2, 1)
     .addCell(0, 0, {
       tag: "div",
@@ -388,6 +388,19 @@ function showErrorDetails(headline: string, detail: string): void {
   });
 }
 
+// A raw JSON.parse failure surfacing all the way up from inside rmapi-js
+// (e.g. getRootHash/putRootHash/uploadFile/getEntries) used to mean whatever
+// endpoint it was reading got an empty body — Zotero.HTTP.request's
+// "arraybuffer" responseType is simply unimplemented and always empty. Fixed
+// at the transport level in globals.ts's zoteroHttpRequest via
+// responseType "text" + overrideMimeType("text/plain; charset=x-user-defined")
+// in requestObserver (see xhrToArrayBuffer). Kept as a safety net:
+// getLastRequestSummary() carries the exact status/content-length/bytes-read
+// for whichever request actually failed, which rmapi-js's own error has no
+// way to attach, so append it here instead of sending the user back to
+// Debug Output Logging if anything like this ever resurfaces.
+const JSON_PARSE_ERROR_RE = /JSON\.parse|Unexpected token|Unexpected end of/i;
+
 /** Fail a progress popup and pop up the full error in a copyable dialog. */
 function failProgress(
   pw: ReturnType<typeof newProgress>,
@@ -398,7 +411,11 @@ function failProgress(
   const text = getString("sync-error", { args: { error: errMsg(e) } });
   pw.changeLine({ type: "fail", progress: 100, text });
   pw.startCloseTimer(8000);
-  showErrorDetails(text, errDetail(e));
+  let detail = errDetail(e);
+  if (JSON_PARSE_ERROR_RE.test(detail)) {
+    detail += `\n\nLast request: ${client.getLastRequestSummary()}`;
+  }
+  showErrorDetails(text, detail);
 }
 
 const PROGRESS_STYLE_ID = `${ID}-progress-style`;
